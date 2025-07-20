@@ -1,0 +1,5 @@
+selenium
+groq
+beautifulsoup4
+html2text
+webdriver-manager

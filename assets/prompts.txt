@@ -1,0 +1,2 @@
+dime cuales archivos pdf contienen la palabra SUBTOTAL
+crea 10 excel files
