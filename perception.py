@@ -63,15 +63,8 @@ class Perception:
         """
         # 1. Page Title
         title = self.soup.title.string if self.soup.title else "No Title"
-        
-        # 2. Simplified Text Content
-        h = html2text.HTML2Text()
-        h.ignore_links = True
-        h.ignore_images = True
-        page_text = h.handle(self.html)
-        truncated_text = (page_text[:400] + '...') if len(page_text) > 400 else page_text
 
-        # 3. Interactive Elements
+        # 2. Interactive Elements
         interactive_elements = self.get_interactive_elements()
         elements_summary = []
         for elem in interactive_elements:
@@ -79,16 +72,16 @@ class Perception:
                 f"- Type: {elem['type']}, Selector: `{elem['selector']}`, Text: '{elem.get('text', '')[:50]}'"
             )
 
-        # 4. Combine into a single string
+        # 3. Combine into a single string
         summary = (
             f"Page Title: {title}\n\n"
-            f"Content Preview:\n---\n{truncated_text}\n---\n\n"
             f"Interactive Elements:\n" +
             "\n".join(elements_summary)
         )
 
         # Ensure it's within the character limit
         return summary[:character_limit]
+
 if __name__ == '__main__':
     # Example Usage
     sample_html = """
@@ -116,4 +109,3 @@ if __name__ == '__main__':
     print("\n--- Content Preview ---")
     content_preview = perception_module._get_content_preview(sample_html)
     print(content_preview)
-

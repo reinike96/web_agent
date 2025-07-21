@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
 import customtkinter as ctk
-from orchestrator import Orchestrator
+from new_orchestrator import NewOrchestrator
 import threading
 from itertools import cycle
 import warnings
@@ -242,7 +242,7 @@ def run_agent_task():
         return
 
     try:
-        agent = Orchestrator(goal=goal, message_callback=lambda msg: set_message(msg, reset=False))
+        agent = NewOrchestrator(goal=goal, message_callback=lambda msg: set_message(msg, reset=False))
         agent.run()
         set_message("Agent has finished its task.", reset=True)
     except Exception as e:
