@@ -2,18 +2,16 @@ import os
 import re
 import json
 import logging
-import os
-import logging
-import json
-import re
-from typing import Dict
+from typing import Dict, List
 from groq import Groq
+from data_extraction_agent import DataExtractionAgent
 
 class LLMController:
     """
     Manages the interaction with the Groq LLM to generate
     Selenium actions based on a given goal and web page context.
     """
+    
     def __init__(self, api_key: str):
         """
         Initializes the Groq client with an API key.
@@ -22,6 +20,9 @@ class LLMController:
             raise ValueError("Groq API key is required.")
         self.client = Groq(api_key=api_key)
         self.model = "moonshotai/kimi-k2-instruct"
+        
+        # Initialize data extraction agent
+        self.data_extraction_agent = DataExtractionAgent(self.client)
 
         # Setup logger with UTF-8 encoding
         self.logger = logging.getLogger(__name__)
@@ -56,6 +57,19 @@ class LLMController:
         """
         Generates a JSON command based on the current page interactive elements and goal.
         """
+        # Check if the current step is a data extraction step
+        if remaining_steps:
+            current_step = remaining_steps[0].lower()
+            extraction_keywords = [
+                "execute javascript", "extraction", "extract data", "download as",
+                "data_extraction_agent", "call data_extraction_agent", "retrieve", "extract",
+                "save as", "export", "scrape", "collect", "gather", "download", "file"
+            ]
+            if any(keyword in current_step for keyword in extraction_keywords):
+                # This is an extraction step - use the DataExtractionAgent
+                print(f"[DEBUG] Detected extraction step: {current_step}")
+                return self._generate_extraction_action(goal, page_info)
+        
         interactive_elements = page_info.get("interactive_elements", {})
         page_structure = page_info.get("page_structure", {})
         
@@ -229,7 +243,18 @@ class LLMController:
     def generate_plan(self, goal: str) -> list[str]:
         """
         Generates a high-level plan to achieve the user's goal.
+        Automatically detects data extraction tasks and creates appropriate plans.
         """
+        # First, check if this is a data extraction task
+        extraction_intent = self.detect_extraction_intent(goal)
+        print(f"[DEBUG] Extraction intent detection result: {extraction_intent}")
+        
+        if extraction_intent["is_extraction"]:
+            # For extraction tasks, create a specialized plan that avoids copy/paste/print
+            print(f"[DEBUG] Using extraction plan for goal: {goal}")
+            return self._generate_extraction_plan(extraction_intent)
+        
+        # For non-extraction tasks, use the regular planning approach
         system_prompt = """
         You are a strategic AI that creates a high-level plan to achieve a user's goal on a website.
         Break down the goal into a series of simple, actionable steps.
@@ -240,6 +265,7 @@ class LLMController:
         3. DO NOT include VERIFY steps - text entry and button clicks are successful if they execute without errors
         4. Keep steps sequential and non-redundant
         5. Only include verification for page navigation (optional)
+        6. NEVER suggest copy/paste or print actions for data extraction. You need to call a data_extraction_agent.
         
         STEP SEPARATION:
         - Opening/clicking to access something = ONE step
@@ -251,19 +277,8 @@ class LLMController:
         - Button clicks (if it clicks, it worked)
         - Form submissions (if it submits, it worked)
         - Scrolling or waiting
-        
-        GOOD EXAMPLE:
-        "1. Navigate to google.com"
-        "2. Click the search box"
-        "3. Type 'artificial intelligence'"
-        "4. Click search button"
-        
-        BAD EXAMPLE (has verification):
-        "1. Navigate to google.com"
-        "2. Type 'artificial intelligence'"
-        "3. Click search button"
-        "4. VERIFY: Search results appear"  ← BAD: unnecessary verification
-        
+        - Checking if the text in the inputbox was sent (if it was pressed send, it was sent)
+
         Return only the numbered list of steps, and nothing else.
         Keep the plan concise and to the point.
         If there is an error and you see that there is a CAPTCHA or login form, you should return a message to the user to solve the CAPTCHA or log in.
@@ -298,6 +313,78 @@ class LLMController:
         except Exception as e:
             print(f"Error generating plan from LLM: {e}")
             return []
+
+    def _generate_extraction_plan(self, extraction_intent: dict) -> list[str]:
+        """
+        Generates a specialized plan for data extraction tasks using JavaScript execution.
+        """
+        target = extraction_intent.get("target", "information")
+        format_type = extraction_intent.get("format", "txt")
+        needs_scrolling = extraction_intent.get("needs_scrolling", False)
+        
+        # Use the DataExtractionAgent to create a proper extraction plan
+        plan_steps = []
+        
+        # Step 1: Navigate to target page (if URL is in goal)
+        goal_lower = target.lower()
+        if "wikipedia" in goal_lower or "wiki" in goal_lower:
+            if "imperio romano" in goal_lower or "roman empire" in goal_lower:
+                plan_steps.append("1. Navigate to https://es.wikipedia.org/wiki/Imperio_romano")
+            else:
+                plan_steps.append("1. Navigate to https://es.wikipedia.org")
+                plan_steps.append("2. Search for the specified topic")
+        elif any(url_indicator in goal_lower for url_indicator in ["http", "www.", ".com", ".org", ".net"]):
+            plan_steps.append("1. Navigate to the specified URL")
+        else:
+            plan_steps.append("1. Navigate to the target page")
+        
+        # Step 2: Wait for page load
+        current_step = len(plan_steps) + 1
+        plan_steps.append(f"{current_step}. Wait for page content to fully load")
+        
+        # Step 3: Optional scrolling if needed
+        if needs_scrolling:
+            current_step += 1
+            plan_steps.append(f"{current_step}. Scroll slowly through the page to load all content")
+        
+        # Step 4: Execute JavaScript extraction - make this step very clear
+        current_step += 1
+        plan_steps.append(f"{current_step}. Execute data extraction JavaScript to collect content and automatically download as {format_type.upper()} file")
+        
+        self.logger.info(f"Generated extraction plan for {target} -> {format_type}: {plan_steps}")
+        return plan_steps
+    
+    def _generate_extraction_action(self, goal: str, page_info: Dict) -> dict:
+        """
+        Generates a JavaScript execution action for data extraction using the DataExtractionAgent.
+        """
+        print(f"[DEBUG] Generating extraction action for goal: {goal}")
+        
+        # Detect extraction details using the agent
+        is_extraction, extraction_details = self.data_extraction_agent.detect_extraction_intent(goal)
+        print(f"[DEBUG] Extraction details: is_extraction={is_extraction}, details={extraction_details}")
+        
+        if not is_extraction:
+            # Fallback to regular action generation
+            print("[DEBUG] No extraction detected, using wait action as fallback")
+            return {"action": "wait", "parameters": {"seconds": 2}}
+        
+        try:
+            # Generate JavaScript code for extraction
+            print("[DEBUG] Generating JavaScript code for extraction...")
+            js_code = self.data_extraction_agent.generate_extraction_javascript(extraction_details)
+            print(f"[DEBUG] Generated JS code length: {len(js_code)} characters")
+            
+            result_action = {
+                "action": "execute_script",
+                "parameters": {"script": js_code}
+            }
+            print(f"[DEBUG] Returning extraction action: {result_action['action']}")
+            return result_action
+        except Exception as e:
+            print(f"[ERROR] Error generating extraction action: {e}")
+            # Fallback to wait action
+            return {"action": "wait", "parameters": {"seconds": 2}}
 
     def verify_step_completion_with_page_info(self, task: str, page_info_before: Dict, page_info_after: Dict) -> bool:
         """
@@ -450,53 +537,55 @@ class LLMController:
             return "input"
         
         return failed_selector
-        """Verifies if the current step is completed based on the page title, URL, and optionally page summary."""
-        system_prompt = """You are an AI assistant that verifies if a web automation task has been successfully completed.
-        Based on the task, the current page title, URL, and optionally the page content summary, determine if the task is complete.
+
+    def verify_step_completion(self, task: str, page_title: str, page_url: str, page_summary: str = None) -> bool:
+        """
+        Verifies if a step has been completed successfully by analyzing page changes.
+        """
+        system_prompt = """You are an expert at verifying task completion in web automation.
+        Analyze the current page state to determine if the specified task has been completed.
         
+        Return only 'true' if the task is completed, 'false' if not completed.
         Consider:
-        - Has the expected navigation occurred?
-        - Are the expected elements present on the page?
-        - Has the expected action been completed successfully?
-        
-        Respond with only "True" or "False".
+        - Page title changes that indicate success
+        - URL changes that show navigation occurred
+        - Content that suggests the task was successful
         """
         
-        user_prompt = f"""Task: "{task}"
-        Current Page Title: "{page_title}"
-        Current URL: "{page_url}"
+        user_prompt = f"""
+        Task to verify: {task}
+        Current page title: {page_title}
+        Current page URL: {page_url}
+        Page summary: {page_summary or 'No summary available'}
+        
+        Has this task been completed successfully? Answer only 'true' or 'false'.
         """
         
-        if page_summary:
-            user_prompt += f"\nPage Content Summary:\n{page_summary}\n"
-        
-        user_prompt += "\nIs the task complete?"
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        self.logger.info(f"Sending to LLM (verify_step_completion):\n{json.dumps(messages, indent=2)}")
         try:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
                 model=self.model,
                 max_tokens=10
             )
+            
             response = chat_completion.choices[0].message.content.strip().lower()
-            self.logger.info(f"Received from LLM (verify_step_completion): {response}")
             return response == "true"
+            
         except Exception as e:
             print(f"Error verifying step completion: {e}")
             return False
 
-
-    def generate_alternative_selectors(self, failed_selector: str, action_type: str, page_summary: str) -> list[str]:
+    def generate_alternative_selectors(self, failed_selector: str, action_type: str, page_summary: str) -> List[str]:
         """
         Generates alternative CSS selectors when the original selector fails.
         This helps handle dynamic pages where element attributes change.
         """
-        system_prompt = f"""You are an expert in CSS selectors and web automation.
+        system_prompt = """You are an expert in CSS selectors and web automation.
         An element selector has failed to find the target element. Generate 3-5 alternative CSS selectors 
         that could target the same element based on the page content.
         
@@ -845,6 +934,330 @@ class LLMController:
             print(f"Error generating verification JavaScript: {e}")
             # Fallback: basic text search
             return f'return document.body.textContent.includes("{verification_requirement}") || false;'
+
+    def generate_data_extraction_script(self, extraction_goal: str, output_format: str, page_context: str) -> str:
+        """
+        Generates JavaScript code to extract specific information from a webpage and create downloadable files.
+        This agent specializes in data extraction with progressive scrolling and file generation.
+        """
+        system_prompt = f"""You are an expert JavaScript code generator specialized in web data extraction.
+        Your task is to generate JavaScript code that:
+        
+        1. EXTRACTS specific information from the current webpage
+        2. HANDLES progressive scrolling to capture all available data
+        3. GENERATES a downloadable file in the specified format
+        4. NEVER attempts to use copy/paste or print functionality
+        
+        OUTPUT FORMATS SUPPORTED:
+        - "txt": Plain text file with structured data
+        - "excel": CSV format that can be opened in Excel
+        - "word": HTML format that can be opened in Word
+        
+        EXTRACTION PATTERNS:
+        - Use document.querySelectorAll() to find data elements
+        - Implement gradual scrolling with window.scrollBy() and waiting
+        - Check for "Load More" buttons and click them automatically
+        - Detect when scrolling reaches the end (no new content loaded)
+        - Extract text content, links, images, tables, lists, etc.
+        
+        PROGRESSIVE SCROLLING TEMPLATE:
+        ```javascript
+        async function scrollAndExtract() {{
+            let allData = [];
+            let lastHeight = 0;
+            let scrollAttempts = 0;
+            const maxScrolls = 50; // Prevent infinite scrolling
+            
+            while (scrollAttempts < maxScrolls) {{
+                // Extract current visible data
+                const currentData = document.querySelectorAll('SELECTOR').forEach(el => /* extract logic */);
+                allData.push(...currentData);
+                
+                // Scroll down
+                window.scrollBy(0, 1000);
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+                
+                // Check if new content loaded
+                const newHeight = document.body.scrollHeight;
+                if (newHeight === lastHeight) {{
+                    break; // No new content, stop scrolling
+                }}
+                lastHeight = newHeight;
+                scrollAttempts++;
+            }}
+            
+            return allData;
+        }}
+        ```
+        
+        FILE GENERATION TEMPLATE:
+        ```javascript
+        function downloadFile(content, filename, mimeType) {{
+            const blob = new Blob([content], {{ type: mimeType }});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }}
+        ```
+        
+        IMPORTANT RULES:
+        - Generate COMPLETE, executable JavaScript code
+        - Include error handling for missing elements
+        - Use descriptive variable names
+        - Add comments explaining each step
+        - Ensure the code is self-contained and doesn't require external libraries
+        - Handle dynamic content loading gracefully
+        - Generate appropriate file names with timestamps
+        
+        Return ONLY the JavaScript code, no explanations.
+        """
+        
+        user_prompt = f"""
+        EXTRACTION GOAL: {extraction_goal}
+        OUTPUT FORMAT: {output_format}
+        
+        PAGE CONTEXT (for selector guidance):
+        {page_context[:1000]}  # Limit context to avoid token limits
+        
+        Generate JavaScript code that:
+        1. Progressively scrolls through the page to capture all data
+        2. Extracts the requested information
+        3. Creates a downloadable {output_format} file with the extracted data
+        4. Handles dynamic content loading automatically
+        
+        Focus on finding the most relevant selectors based on the page structure shown above.
+        """
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        self.logger.info(f"Sending to LLM (generate_data_extraction_script): {extraction_goal} -> {output_format}")
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                max_tokens=2000  # Allow for longer responses since we're generating complete code
+            )
+            js_code = chat_completion.choices[0].message.content.strip()
+            self.logger.info(f"Received extraction script from LLM (length: {len(js_code)} chars)")
+            
+            # Clean up the JavaScript code
+            js_code = js_code.replace('```javascript', '').replace('```', '').strip()
+            
+            return js_code
+            
+        except Exception as e:
+            print(f"Error generating data extraction script: {e}")
+            return self._generate_fallback_extraction_script(extraction_goal, output_format)
+    
+    def _generate_fallback_extraction_script(self, extraction_goal: str, output_format: str) -> str:
+        """
+        Generates a basic fallback extraction script when the LLM fails.
+        """
+        if output_format == "txt":
+            return """
+            // Fallback data extraction script for TXT format
+            async function extractData() {
+                console.log('Starting data extraction for TXT format...');
+                let allText = [];
+                let scrollAttempts = 0;
+                let lastHeight = document.body.scrollHeight;
+                
+                // Progressive scrolling and extraction
+                while (scrollAttempts < 20) {
+                    // Extract text from common content selectors
+                    const elements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, span[data-text="true"], div[role="article"]');
+                    elements.forEach(el => {
+                        const text = el.textContent.trim();
+                        if (text && text.length > 10 && !allText.includes(text)) {
+                            allText.push(text);
+                        }
+                    });
+                    
+                    console.log(`Scroll attempt ${scrollAttempts + 1}, found ${allText.length} text elements`);
+                    window.scrollBy(0, 1000);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    const newHeight = document.body.scrollHeight;
+                    if (newHeight === lastHeight) break;
+                    lastHeight = newHeight;
+                    scrollAttempts++;
+                }
+                
+                // Generate file
+                const content = allText.join('\\n\\n');
+                const filename = `extracted_data_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.txt`;
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                console.log(`Data extracted to ${filename}`);
+                return `Data extracted to ${filename}`;
+            }
+            
+            extractData().then(console.log).catch(console.error);
+            """
+        elif output_format == "excel":
+            return """
+            // Fallback data extraction script for Excel/CSV format
+            async function extractDataToCSV() {
+                console.log('Starting data extraction for CSV format...');
+                let allData = [];
+                let scrollAttempts = 0;
+                let lastHeight = document.body.scrollHeight;
+                
+                // Add header row
+                allData.push('"Content","Type","Source"');
+                
+                // Progressive scrolling and extraction
+                while (scrollAttempts < 20) {
+                    // Extract structured data
+                    const rows = document.querySelectorAll('tr, div[role="row"], li, p, h1, h2, h3');
+                    rows.forEach((row, index) => {
+                        const text = row.textContent.trim().replace(/"/g, '""');
+                        if (text && text.length > 5) {
+                            const rowData = `"${text}","${row.tagName}","Row ${index + 1}"`;
+                            if (!allData.includes(rowData)) {
+                                allData.push(rowData);
+                            }
+                        }
+                    });
+                    
+                    console.log(`Scroll attempt ${scrollAttempts + 1}, found ${allData.length} data rows`);
+                    window.scrollBy(0, 1000);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    const newHeight = document.body.scrollHeight;
+                    if (newHeight === lastHeight) break;
+                    lastHeight = newHeight;
+                    scrollAttempts++;
+                }
+                
+                // Generate CSV file
+                const csvContent = allData.join('\\n');
+                const filename = `extracted_data_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.csv`;
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                console.log(`CSV data extracted to ${filename}`);
+                return `CSV data extracted to ${filename}`;
+            }
+            
+            extractDataToCSV().then(console.log).catch(console.error);
+            """
+        else:  # word format
+            return """
+            // Fallback data extraction script for Word/HTML format
+            async function extractDataToWord() {
+                console.log('Starting data extraction for Word format...');
+                let allContent = [];
+                let scrollAttempts = 0;
+                let lastHeight = document.body.scrollHeight;
+                
+                // Progressive scrolling and extraction
+                while (scrollAttempts < 20) {
+                    // Extract formatted content
+                    const elements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, ul, ol, table, blockquote');
+                    elements.forEach(el => {
+                        const content = el.outerHTML;
+                        if (!allContent.some(item => item.includes(el.textContent.trim().substring(0, 50)))) {
+                            allContent.push(content);
+                        }
+                    });
+                    
+                    console.log(`Scroll attempt ${scrollAttempts + 1}, found ${allContent.length} formatted elements`);
+                    window.scrollBy(0, 1000);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                    
+                    const newHeight = document.body.scrollHeight;
+                    if (newHeight === lastHeight) break;
+                    lastHeight = newHeight;
+                    scrollAttempts++;
+                }
+                
+                // Generate Word-compatible HTML file
+                const htmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <title>Extracted Data</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+                        h1, h2, h3 { color: #333; margin-top: 20px; }
+                        table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+                        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                        th { background-color: #f2f2f2; }
+                        blockquote { border-left: 4px solid #ccc; margin: 10px 0; padding-left: 10px; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Extracted Data Report</h1>
+                    <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+                    <p><strong>Source:</strong> ${window.location.href}</p>
+                    <hr>
+                    ${allContent.join('\\n')}
+                </body>
+                </html>
+                `;
+                
+                const filename = `extracted_data_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.html`;
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                console.log(`Word-compatible data extracted to ${filename}`);
+                return `Word-compatible data extracted to ${filename}`;
+            }
+            
+            extractDataToWord().then(console.log).catch(console.error);
+            """
+
+    def detect_extraction_intent(self, goal: str) -> dict:
+        """
+        Detects if the user's goal involves data extraction using the DataExtractionAgent.
+        Returns extraction details or None if not an extraction task.
+        """
+        # Use the specialized DataExtractionAgent for detection
+        is_extraction, extraction_details = self.data_extraction_agent.detect_extraction_intent(goal)
+        
+        if not is_extraction:
+            return {"is_extraction": False}
+        
+        # Convert to the expected format for the plan generator
+        return {
+            "is_extraction": True,
+            "format": extraction_details.get("format", "txt"),
+            "target": extraction_details.get("goal", goal),
+            "original_goal": goal,
+            "needs_scrolling": extraction_details.get("needs_scrolling", False)
+        }
 
 
 if __name__ == '__main__':
