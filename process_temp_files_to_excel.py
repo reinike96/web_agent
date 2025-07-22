@@ -4,6 +4,7 @@ Script to process existing temporary files and generate Excel
 """
 import os
 import sys
+import argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -21,10 +22,17 @@ try:
     from llm_controller import LLMController
     import tempfile
     
-    def process_temp_files_to_document():
+    def process_temp_files_to_document(original_objective=None):
         """Process existing temporary files and generate appropriate document based on objective"""
         
         safe_print("=== PROCESSING TEMPORARY FILES TO DOCUMENT ===")
+        
+        # Use provided objective or default
+        if original_objective:
+            safe_print(f"[OBJECTIVE] Using provided objective: {original_objective}")
+        else:
+            original_objective = "Process and structure web content from extracted pages"
+            safe_print(f"[OBJECTIVE] Using default objective: {original_objective}")
         
         # Search for recent temporary files (last 2 hours)
         temp_dir = Path(tempfile.gettempdir())
@@ -62,39 +70,6 @@ try:
         # Create extracted pages structure
         extracted_pages = []
         processed_results = []
-        
-        # Try to determine objective from the most recent temp file content
-        original_objective = "Process and structure web content from extracted pages"
-        
-        # Try to infer more specific objective from content
-        sample_content = ""
-        if temp_files:
-            try:
-                with open(temp_files[-1]['file'], 'r', encoding='utf-8') as f:
-                    sample_content = f.read(500).lower()
-                
-                # Try to detect specific domains/contexts
-                if 'amazon' in sample_content and ('shoes' in sample_content or 'zapatillas' in sample_content):
-                    original_objective = "Extract product information from Amazon.de shoe listings in table format"
-                elif 'amazon' in sample_content:
-                    original_objective = "Extract product information from Amazon.de"
-                elif 'wikipedia' in sample_content:
-                    original_objective = "Analyze and organize content from Wikipedia articles"
-                elif any(word in sample_content for word in ['price', 'product', 'buy', 'sale']):
-                    original_objective = "Analyze product and pricing information from web pages"
-                elif 'news' in sample_content or 'article' in sample_content:
-                    original_objective = "Analyze and organize news articles and web content"
-                elif 'recipe' in sample_content or 'cooking' in sample_content:
-                    original_objective = "Extract and organize recipe information"
-                elif 'job' in sample_content or 'career' in sample_content or 'employment' in sample_content:
-                    original_objective = "Analyze job listings and employment information"
-                else:
-                    # Generic task - let the LLM determine what to do
-                    original_objective = "Analyze and organize web content based on the specific content found"
-            except:
-                pass
-        
-        safe_print(f"[OBJECTIVE] Detected objective: {original_objective}")
         
         for i, tf in enumerate(temp_files[:3], 1):  # Only first 3
             try:
@@ -366,7 +341,15 @@ try:
             return False
     
     if __name__ == "__main__":
-        success = process_temp_files_to_document()
+        # Parse command line arguments
+        parser = argparse.ArgumentParser(description='Process temporary files and generate documents')
+        parser.add_argument('--goal', type=str, help='The original objective from the user')
+        args = parser.parse_args()
+        
+        # Use the provided goal or None (will use default)
+        user_goal = args.goal if args.goal else None
+        
+        success = process_temp_files_to_document(original_objective=user_goal)
         if success:
             safe_print("\n[COMPLETE] PROCESSING SUCCESSFUL!")
             safe_print("Output file generated with processed web content")

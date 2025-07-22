@@ -168,12 +168,12 @@ class NewOrchestrator:
                     if os.path.exists(script_path):
                         self.safe_print("[FINAL-PROCESS] Executing final document processing...")
                         
-                        # Execute in same console without new window
+                        # Execute in same console without new window, passing the original goal
                         subprocess.Popen([
-                            'python', script_path
+                            'python', script_path, '--goal', self.goal
                         ], cwd=os.path.dirname(__file__))
                         
-                        self.safe_print("[FINAL-PROCESS] Document processing started")
+                        self.safe_print(f"[FINAL-PROCESS] Document processing started with goal: {self.goal}")
                 else:
                     self.safe_print("[FINAL-CHECK] No unprocessed temp files found")
                     
