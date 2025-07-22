@@ -163,7 +163,7 @@ try:
                         
                         Process this web page content according to the task above and format the results as a structured ASCII table:
                         
-                        {page_data['content'][:8000]}
+                        {page_data['content'][:10000]}
                         
                         Return the data in ASCII table format. For example:
                         | Column 1    | Column 2    | Column 3    |
@@ -181,7 +181,7 @@ try:
                         
                         Process this web page content according to the task specified above:
                         
-                        {page_data['content'][:8000]}
+                        {page_data['content'][:10000]}
                         
                         Complete the task as requested and return the results in a clear, well-organized format.
                         The task could be anything - extraction, analysis, summary, comparison, etc.
@@ -195,8 +195,7 @@ try:
                                 {"role": "system", "content": "You are an expert data processor. Follow the user's instructions exactly and return well-formatted content."},
                                 {"role": "user", "content": extraction_prompt}
                             ],
-                            max_tokens=1500,
-                            temperature=0.1
+                            temperature=0.4,
                         )
                         
                         llm_response = response.choices[0].message.content.strip()
@@ -250,25 +249,19 @@ try:
         # Consolidate results based on objective and desired format
         safe_print("[CONSOLIDATE] Consolidating processed content...")
         
-        # Build final consolidated content
-        consolidated_data = f"WEB CONTENT EXTRACTION RESULTS\n\n"
-        consolidated_data += f"Original Objective: {original_objective}\n"
-        consolidated_data += f"Pages processed: {len(processed_content)}\n"
-        consolidated_data += f"Total characters analyzed: {sum(p['content_length'] for p in extracted_pages):,}\n"
-        consolidated_data += f"Processing date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
+        # Build final consolidated content based on format
         if wants_table_format:
-            # For table format, consolidate ASCII tables
-            consolidated_data += "CONSOLIDATED TABLE DATA:\n\n"
+            # For table format - ONLY LLM generated table data, no metadata
+            consolidated_data = ""
             for content in processed_content:
-                consolidated_data += f"=== PAGE {content['page_number']}: {content['title']} ===\n"
-                consolidated_data += f"Source: {content['url']}\n\n"
+                # Extract only the LLM processed content (tables)
                 consolidated_data += content['processed_content'] + "\n\n"
-                consolidated_data += f"(Original content: {content['original_length']:,} characters)\n"
-                consolidated_data += "-" * 80 + "\n\n"
-                
         else:
             # For document format, create consolidated results based on the user's task
+            consolidated_data = f"TASK RESULTS: {original_objective}\n\n"
+            consolidated_data += f"Processing completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            consolidated_data += f"Pages analyzed: {len(processed_content)}\n\n"
+            
             all_results = []
             for content in processed_content:
                 all_results.append(f"Page {content['page_number']}: {content['processed_content']}")
@@ -313,16 +306,9 @@ try:
                     consolidated_data += f"Page {content['page_number']}: {content['title']}\n"
                     consolidated_data += f"{content['processed_content']}\n\n"
         
-        # Add final summary
-        consolidated_data += f"PROCESSING SUMMARY:\n"
-        consolidated_data += f"- Successfully processed {len(processed_content)} pages\n"
-        consolidated_data += f"- Total content analyzed: {sum(p['original_length'] for p in processed_content):,} characters\n"
-        consolidated_data += f"- Output format: {'Table/Excel' if wants_table_format else 'Document/Word'}\n"
-        consolidated_data += f"- Processing completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        
         # Generate output file based on format preference
         if wants_table_format:
-            safe_print("[EXCEL] Generating Excel file with table data...")
+            safe_print("[EXCEL] Generating Excel file with pure table data...")
             file_type = "excel"
         else:
             safe_print("[WORD] Generating Word document with processed content...")

@@ -110,148 +110,149 @@ class FileGenerator:
             safe_print(f"[ERROR] Error showing file dialog: {e}")
             return None
     
+    def parse_ascii_table(self, text: str) -> List[List[str]]:
+        """
+        Parse ASCII table from text and return rows and columns
+        """
+        lines = text.split('\n')
+        table_data = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and separator lines
+            if not line or line.startswith('+-') or line.startswith('|-') or set(line) == {'-', '|', '+', ' '}:
+                continue
+                
+            # Check if this looks like a table row
+            if '|' in line:
+                # Split by | and clean up
+                columns = [col.strip() for col in line.split('|')]
+                # Remove empty first/last columns (from leading/trailing |)
+                if columns and columns[0] == '':
+                    columns = columns[1:]
+                if columns and columns[-1] == '':
+                    columns = columns[:-1]
+                
+                if columns:  # Only add non-empty rows
+                    table_data.append(columns)
+        
+        return table_data
+
     def generate_excel_file(self, consolidated_data: str, original_objective: str, 
                           summary_info: Dict[str, Any], output_path: str = None) -> Optional[str]:
         """
-        Generate Excel file with consolidated results
+        Generate Excel file with pure table data (no metadata for table format)
         """
         if not EXCEL_AVAILABLE:
             safe_print("[ERROR] openpyxl not available to generate Excel")
             return None
-        
+
         try:
             # Seleccionar archivo de salida si no se proporciona
             if not output_path:
                 output_path = self.choose_output_file("extracted_results", "excel")
                 if not output_path:
                     return None
-            
-            safe_print(f"[EXCEL] Generando archivo Excel: {output_path}")
+
+            safe_print(f"[EXCEL] Generating Excel file with table data: {output_path}")
             
             # Crear workbook
             from openpyxl import Workbook
-            from openpyxl.styles import Font, Alignment, PatternFill
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
             
             wb = Workbook()
+            wb.remove(wb.active)  # Remove default sheet
             
-            # Summary sheet
-            ws_summary = wb.active
-            ws_summary.title = "Summary"
+            # Parse all ASCII tables from consolidated data
+            sections = consolidated_data.split('\n\n')
+            sheet_number = 1
             
-            # Summary header
+            header_font = Font(bold=True, color="FFFFFF")
             header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-            header_font = Font(color="FFFFFF", bold=True, size=14)
+            border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
             
-            ws_summary['A1'] = "WEB DATA EXTRACTION REPORT"
-            ws_summary['A1'].font = header_font
-            ws_summary['A1'].fill = header_fill
-            ws_summary.merge_cells('A1:D1')
-            
-            # General information
-            row = 3
-            info_font = Font(bold=True)
-            
-            ws_summary[f'A{row}'] = "Original Objective:"
-            ws_summary[f'A{row}'].font = info_font
-            ws_summary[f'B{row}'] = original_objective
-            row += 1
-            
-            ws_summary[f'A{row}'] = "Extraction Date:"
-            ws_summary[f'A{row}'].font = info_font
-            ws_summary[f'B{row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row += 1
-            
-            ws_summary[f'A{row}'] = "Pages Processed:"
-            ws_summary[f'A{row}'].font = info_font
-            ws_summary[f'B{row}'] = summary_info.get('pages_processed', 0)
-            row += 1
-            
-            ws_summary[f'A{row}'] = "Total Characters:"
-            ws_summary[f'A{row}'].font = info_font
-            ws_summary[f'B{row}'] = summary_info.get('total_content_chars', 0)
-            row += 2
-            
-            # Consolidated results
-            ws_summary[f'A{row}'] = "CONSOLIDATED RESULTS:"
-            ws_summary[f'A{row}'].font = info_font
-            row += 1
-            
-            # Split consolidated text into lines and add them
-            for line in consolidated_data.split('\n'):
-                if line.strip():
-                    ws_summary[f'A{row}'] = line.strip()
-                    row += 1
-            
-            # Page details sheet
-            if summary_info.get('pages_info'):
-                ws_details = wb.create_sheet("Page Details")
-                
-                # Headers
-                headers = ['Page', 'Title', 'URL', 'Characters']
-                for col, header in enumerate(headers, 1):
-                    cell = ws_details.cell(row=1, column=col, value=header)
-                    cell.font = header_font
-                    cell.fill = header_fill
-                
-                # Page data
-                for row, page_info in enumerate(summary_info['pages_info'], 2):
-                    ws_details.cell(row=row, column=1, value=page_info.get('page_number', 'N/A'))
-                    ws_details.cell(row=row, column=2, value=page_info.get('title', 'N/A'))
-                    ws_details.cell(row=row, column=3, value=page_info.get('url', 'N/A'))
-                    ws_details.cell(row=row, column=4, value=page_info.get('content_length', 0))
-                
-                # Ajustar ancho de columnas
-                try:
-                    for col_idx in range(1, 5):  # Columnas A-D
-                        max_length = 0
-                        column_letter = chr(64 + col_idx)  # A=1, B=2, etc.
-                        
-                        for row_idx in range(1, ws_details.max_row + 1):
-                            cell = ws_details.cell(row=row_idx, column=col_idx)
-                            try:
-                                if cell.value and len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                                
-                        adjusted_width = min(max_length + 2, 50)
-                        ws_details.column_dimensions[column_letter].width = adjusted_width
-                except Exception as e:
-                    safe_print(f"[WARNING] Error ajustando ancho de columnas: {e}")
-            
-            # Ajustar ancho de columnas en resumen
-            try:
-                for col_idx in range(1, 5):  # Columnas A-D
-                    max_length = 0
-                    column_letter = chr(64 + col_idx)  # A=1, B=2, etc.
+            for section in sections:
+                if not section.strip():
+                    continue
                     
-                    for row_idx in range(1, ws_summary.max_row + 1):
-                        cell = ws_summary.cell(row=row_idx, column=col_idx)
-                        try:
-                            if cell.value and len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except:
-                            pass
+                # Try to parse as ASCII table
+                table_data = self.parse_ascii_table(section)
+                
+                if table_data and len(table_data) > 0:
+                    # Create new sheet for this table
+                    sheet_name = f"Table_{sheet_number}"
+                    ws = wb.create_sheet(sheet_name)
+                    
+                    # Add table data
+                    for row_idx, row_data in enumerate(table_data, 1):
+                        for col_idx, cell_value in enumerate(row_data, 1):
+                            cell = ws.cell(row=row_idx, column=col_idx, value=cell_value)
+                            cell.border = border
                             
-                    adjusted_width = min(max_length + 2, 80)
-                    ws_summary.column_dimensions[column_letter].width = adjusted_width
-            except Exception as e:
-                safe_print(f"[WARNING] Error ajustando ancho de columnas en resumen: {e}")
+                            # Style header row
+                            if row_idx == 1:
+                                cell.font = header_font
+                                cell.fill = header_fill
+                                cell.alignment = Alignment(horizontal='center', vertical='center')
+                            else:
+                                cell.alignment = Alignment(vertical='center')
+                    
+                    # Auto-adjust column widths
+                    for col_idx in range(1, len(table_data[0]) + 1 if table_data else 1):
+                        max_length = 0
+                        column_letter = ws.cell(row=1, column=col_idx).column_letter
+                        
+                        for row_idx in range(1, len(table_data) + 1):
+                            cell_value = ws.cell(row=row_idx, column=col_idx).value
+                            if cell_value:
+                                max_length = max(max_length, len(str(cell_value)))
+                        
+                        adjusted_width = min(max_length + 3, 50)
+                        ws.column_dimensions[column_letter].width = max(adjusted_width, 12)
+                    
+                    sheet_number += 1
+                
+                else:
+                    # If not a table, check if it contains useful text data
+                    text_lines = [line.strip() for line in section.split('\n') if line.strip()]
+                    if text_lines:
+                        # Create a simple sheet with the text content
+                        sheet_name = f"Content_{sheet_number}"
+                        ws = wb.create_sheet(sheet_name)
+                        
+                        for row_idx, line in enumerate(text_lines, 1):
+                            ws.cell(row=row_idx, column=1, value=line)
+                        
+                        # Auto-adjust column width
+                        max_length = max(len(line) for line in text_lines) if text_lines else 20
+                        ws.column_dimensions['A'].width = min(max_length + 3, 100)
+                        
+                        sheet_number += 1
+            
+            # If no sheets were created, create a default one
+            if len(wb.sheetnames) == 0:
+                ws = wb.create_sheet("Data")
+                ws.cell(row=1, column=1, value="No table data found in the processed content")
             
             # Guardar archivo
             wb.save(output_path)
             
-            safe_print(f"[SUCCESS] Archivo Excel generado: {output_path}")
+            safe_print(f"[SUCCESS] Excel file generated with {len(wb.sheetnames)} sheet(s): {output_path}")
             return output_path
             
         except Exception as e:
-            safe_print(f"[ERROR] Error generando archivo Excel: {e}")
+            safe_print(f"[ERROR] Error generating Excel file: {e}")
             return None
     
     def generate_word_file(self, consolidated_data: str, original_objective: str,
                          summary_info: Dict[str, Any], output_path: str = None) -> Optional[str]:
         """
-        Generate Word file with consolidated results
+        Generate clean Word file with only LLM responses (no metadata)
         """
         if not WORD_AVAILABLE:
             safe_print("[ERROR] python-docx not available to generate Word")
@@ -272,75 +273,78 @@ class FileGenerator:
             
             doc = Document()
             
-            # Main title
-            title = doc.add_heading('WEB DATA EXTRACTION REPORT', 0)
-            title.alignment = 1  # Centered
+            # Extract only the LLM-generated content
+            lines = consolidated_data.split('\n')
+            content_started = False
+            clean_content = []
             
-            # General information
-            doc.add_heading('General Information', level=1)
+            for line in lines:
+                line = line.strip()
+                
+                # Skip metadata lines
+                if any(metadata in line for metadata in [
+                    'WEB DATA EXTRACTION REPORT',
+                    'TASK RESULTS:',
+                    'Processing completed:',
+                    'Pages analyzed:',
+                    'Original Objective:',
+                    'Extraction Date:',
+                    'Pages Processed:',
+                    'Total Characters:',
+                    'General Information',
+                    'Consolidated Results'
+                ]):
+                    continue
+                    
+                # Look for actual content sections
+                if line.startswith('CONSOLIDATED RESULT:') or line.startswith('COMPREHENSIVE SUMMARY:'):
+                    content_started = True
+                    continue
+                elif line.startswith('INDIVIDUAL PAGE RESULTS:'):
+                    content_started = True
+                    continue
+                
+                # Add meaningful content
+                if content_started and line:
+                    # Skip page indicators like "Page 1:"
+                    if not line.startswith('Page ') or ':' not in line:
+                        clean_content.append(line)
+                    elif ':' in line and not line.startswith('Page '):
+                        # Keep lines that have colons but aren't page indicators
+                        clean_content.append(line)
+                elif line and not any(skip in line for skip in ['===', '---', 'PROCESSING SUMMARY']):
+                    clean_content.append(line)
             
-            info_para = doc.add_paragraph()
-            info_para.add_run('Original Objective: ').bold = True
-            info_para.add_run(original_objective)
+            # If no clean content found, use all non-metadata content
+            if not clean_content:
+                for line in lines:
+                    line = line.strip()
+                    if line and not any(metadata in line for metadata in [
+                        'WEB DATA EXTRACTION REPORT',
+                        'TASK RESULTS:',
+                        'Processing completed:',
+                        'Pages analyzed:',
+                        'Original Objective:',
+                        'Extraction Date:',
+                        'Pages Processed:',
+                        'Total Characters:',
+                        '===', '---'
+                    ]):
+                        clean_content.append(line)
             
-            info_para = doc.add_paragraph()
-            info_para.add_run('Extraction Date: ').bold = True
-            info_para.add_run(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            
-            info_para = doc.add_paragraph()
-            info_para.add_run('Pages Processed: ').bold = True
-            info_para.add_run(str(summary_info.get('pages_processed', 0)))
-            
-            info_para = doc.add_paragraph()
-            info_para.add_run('Total Characters Extracted: ').bold = True
-            info_para.add_run(f"{summary_info.get('total_content_chars', 0):,}")
-            
-            # Consolidated results
-            doc.add_heading('Consolidated Results', level=1)
-            
-            # Agregar el contenido consolidado
-            for line in consolidated_data.split('\n'):
+            # Add clean content to document
+            for line in clean_content:
                 if line.strip():
                     doc.add_paragraph(line.strip())
             
-            # Detalles por página (si hay información)
-            if summary_info.get('pages_info'):
-                doc.add_heading('Detalles por Página', level=1)
-                
-                # Crear tabla
-                table = doc.add_table(rows=1, cols=4)
-                table.style = 'Light Grid Accent 1'
-                
-                # Encabezados
-                hdr_cells = table.rows[0].cells
-                hdr_cells[0].text = 'Página'
-                hdr_cells[1].text = 'Título'
-                hdr_cells[2].text = 'URL'
-                hdr_cells[3].text = 'Caracteres'
-                
-                # Datos
-                for page_info in summary_info['pages_info']:
-                    row_cells = table.add_row().cells
-                    row_cells[0].text = str(page_info.get('page_number', 'N/A'))
-                    row_cells[1].text = page_info.get('title', 'N/A')
-                    row_cells[2].text = page_info.get('url', 'N/A')
-                    row_cells[3].text = str(page_info.get('content_length', 0))
-            
-            # Pie de página
-            doc.add_paragraph('\n\n')
-            footer_para = doc.add_paragraph()
-            footer_para.add_run('Generado automáticamente por Web Agent - ').italic = True
-            footer_para.add_run(datetime.now().strftime("%Y-%m-%d %H:%M:%S")).italic = True
-            footer_para.alignment = 1  # Centrado
-            
-            # Guardar archivo
+            # Save document
             doc.save(output_path)
             
-            safe_print(f"[SUCCESS] Archivo Word generado: {output_path}")
+            safe_print(f"[SUCCESS] Clean Word document generated: {output_path}")
             return output_path
             
         except Exception as e:
-            safe_print(f"[ERROR] Error generando archivo Word: {e}")
+            safe_print(f"[ERROR] Error generating Word file: {e}")
             return None
     
     def open_file_location(self, file_path: str):

@@ -133,6 +133,52 @@ class NewOrchestrator:
         print(completion_message)
         if self.message_callback:
             self.message_callback(completion_message)
+            
+        # Final auto-trigger check if we have extracted pages but didn't process them yet
+        if hasattr(self, 'pages_extracted') and self.pages_extracted > 0:
+            self.safe_print(f"[FINAL-CHECK] Found {self.pages_extracted} extracted pages, checking if processing is needed...")
+            
+            try:
+                # Check if there are recent temp files that haven't been processed
+                import tempfile
+                from pathlib import Path
+                from datetime import datetime
+                
+                temp_dir = Path(tempfile.gettempdir())
+                recent_temp_files = []
+                cutoff_time = datetime.now().timestamp() - 7200  # 2 hours
+                
+                for temp_file in temp_dir.glob("tmp*.txt"):
+                    try:
+                        if temp_file.stat().st_mtime > cutoff_time:
+                            with open(temp_file, 'r', encoding='utf-8') as f:
+                                content = f.read(100).lower()
+                                if any(word in content for word in ['http', 'www', 'title:', 'url:', 'wikipedia']):
+                                    recent_temp_files.append(temp_file)
+                    except:
+                        continue
+                
+                if recent_temp_files:
+                    self.safe_print(f"[FINAL-TRIGGER] Found {len(recent_temp_files)} unprocessed temp files, triggering processing...")
+                    
+                    import subprocess
+                    import os
+                    
+                    script_path = os.path.join(os.path.dirname(__file__), "process_temp_files_to_excel.py")
+                    if os.path.exists(script_path):
+                        self.safe_print("[FINAL-PROCESS] Executing final document processing...")
+                        
+                        # Execute in same console without new window
+                        subprocess.Popen([
+                            'python', script_path
+                        ], cwd=os.path.dirname(__file__))
+                        
+                        self.safe_print("[FINAL-PROCESS] Document processing started")
+                else:
+                    self.safe_print("[FINAL-CHECK] No unprocessed temp files found")
+                    
+            except Exception as e:
+                self.safe_print(f"[FINAL-CHECK] Error checking for temp files: {e}")
 
     def is_verification_step(self, task: str) -> bool:
         """Check if a task is a verification step."""
@@ -547,25 +593,78 @@ class NewOrchestrator:
                     self.safe_print(f"[SUCCESS] Extracted {result.get('content_length', 0)} characters from '{result.get('title', 'Unknown')}'")
                     self.safe_print(f"[DATA] Total pages extracted: {self.pages_extracted}")
                     
-                    # Auto-trigger Excel generation if goal involves Excel output
+                    # Auto-trigger document generation for any format - Check if this seems to be the final step
                     goal_lower = self.goal.lower()
-                    if any(keyword in goal_lower for keyword in ['excel', 'archivo excel', 'spreadsheet']):
-                        # Check if we've extracted enough pages or this is the final extraction
-                        current_step = self.plan[self.current_step_index] if self.current_step_index < len(self.plan) else ""
-                        next_step = self.plan[self.current_step_index + 1] if self.current_step_index + 1 < len(self.plan) else ""
+                    current_step = self.plan[self.current_step_index] if self.current_step_index < len(self.plan) else ""
+                    next_step = self.plan[self.current_step_index + 1] if self.current_step_index + 1 < len(self.plan) else ""
+                    
+                    # Debug information
+                    self.safe_print(f"[DEBUG] Current step index: {self.current_step_index}")
+                    self.safe_print(f"[DEBUG] Total plan steps: {len(self.plan)}")
+                    self.safe_print(f"[DEBUG] Current step: {current_step}")
+                    self.safe_print(f"[DEBUG] Next step: {next_step}")
+                    
+                    # Check if this is the final extraction step or if next step doesn't involve extraction
+                    is_final_step = (
+                        self.current_step_index >= len(self.plan) - 2 or  # Last or second-to-last step
+                        not next_step.strip() or  # No meaningful next step
+                        'save' in next_step.lower() or  # Next step is about saving
+                        'word' in next_step.lower() or 'document' in next_step.lower() or  # Next step mentions document
+                        'consolidat' in next_step.lower() or  # Next step is consolidation
+                        'system will automatically' in next_step.lower() or  # Next step is automatic
+                        not any(word in next_step.lower() for word in ['extract', 'click', 'navigate', 'search', 'type', 'enter'])  # Next step is not a typical web action
+                    )
+                    
+                    self.safe_print(f"[DEBUG] Is final step: {is_final_step}")
+                    
+                    if is_final_step:
+                        self.safe_print("[AUTO-TRIGGER] Final extraction detected, triggering document generation...")
                         
-                        # If next step involves consolidation or this seems to be the last extraction
-                        if ('consolidat' in next_step.lower() or 'system will automatically' in next_step.lower() or 
-                            self.pages_extracted >= 2):  # Or if we've extracted multiple pages
-                            
-                            self.safe_print("[AUTO-TRIGGER] Goal involves Excel output, checking for auto-generation...")
-                            
-                            # Use the data extraction agent's auto-trigger method
-                            excel_triggered = self.data_extraction_agent.auto_trigger_excel_generation()
-                            if excel_triggered:
-                                self.safe_print("[AUTO-EXCEL] Excel generation dialog triggered successfully")
+                        # Determine format from goal and current step
+                        wants_excel = any(keyword in goal_lower for keyword in ['excel', 'tabla', 'table', 'spreadsheet', 'csv'])
+                        wants_word = any(keyword in goal_lower for keyword in ['word', 'doc', 'document', 'resumen', 'summary'])
+                        
+                        if not wants_excel and not wants_word:
+                            # Try to detect from current step
+                            step_lower = current_step.lower()
+                            if any(keyword in step_lower for keyword in ['excel', 'tabla', 'table', 'spreadsheet']):
+                                wants_excel = True
+                            elif any(keyword in step_lower for keyword in ['word', 'doc', 'document']):
+                                wants_word = True
                             else:
-                                self.safe_print("[AUTO-EXCEL] Could not auto-trigger Excel generation")
+                                wants_word = True  # Default to Word for general content
+                        
+                        format_type = "excel" if wants_excel else "word"
+                        self.safe_print(f"[AUTO-TRIGGER] Detected format: {format_type}")
+                        
+                        # Trigger the processing directly
+                        try:
+                            import subprocess
+                            import os
+                            
+                            script_path = os.path.join(os.path.dirname(__file__), "process_temp_files_to_excel.py")
+                            if os.path.exists(script_path):
+                                self.safe_print("[AUTO-PROCESS] Executing document processing...")
+                                
+                                # Execute without capturing output so user sees the progress and dialog
+                                result = subprocess.Popen([
+                                    'python', script_path
+                                ], cwd=os.path.dirname(__file__))
+                                
+                                self.safe_print("[AUTO-PROCESS] Document processing started")
+                                self.safe_print(f"[AUTO-PROCESS] Process ID: {result.pid}")
+                                
+                                # Wait for process to complete
+                                result.wait()
+                                self.safe_print("[AUTO-PROCESS] Document processing completed")
+                                
+                            else:
+                                self.safe_print("[ERROR] Processing script not found")
+                                
+                        except Exception as e:
+                            self.safe_print(f"[ERROR] Could not trigger auto-processing: {e}")
+                    else:
+                        self.safe_print("[AUTO-TRIGGER] Not final step, waiting for more extractions...")
                     
                     return True
                 else:
@@ -835,6 +934,22 @@ class NewOrchestrator:
                 except Exception as e:
                     self.safe_print(f"[ERROR] Error procesando a Excel: {e}")
                     return False
+                    
+            elif action_name == "data_extraction_agent":
+                # Map data_extraction_agent to extract_simple automatically
+                self.safe_print("[MAPPING] Converting 'data_extraction_agent' to 'extract_simple'")
+                
+                # Create extract_simple action with appropriate parameters
+                extract_action = {
+                    "action": "extract_simple",
+                    "parameters": {
+                        "format": params.get("format", "txt"),
+                        "goal": params.get("task", params.get("goal", "Extract page content"))
+                    }
+                }
+                
+                # Recursively call with the mapped action
+                return self.execute_action_enhanced(extract_action)
                 
             else:
                 self.safe_print(f"Unknown action: {action_name}")
