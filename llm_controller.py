@@ -39,20 +39,57 @@ class LLMController:
         """Clean Unicode characters that might cause encoding issues in logging."""
         try:
             # Replace common problematic Unicode characters
-            text = text.replace('\u2192', '->')  # → 
-            text = text.replace('\u2190', '<-')  # ←
+            text = text.replace('\u2192', '->')  # ? 
+            text = text.replace('\u2190', '<-')  # ?
             text = text.replace('\u2018', "'")   # '
             text = text.replace('\u2019', "'")   # '
             text = text.replace('\u201c', '"')   # "
             text = text.replace('\u201d', '"')   # "
-            text = text.replace('\u2013', '-')   # –
-            text = text.replace('\u2014', '--')  # —
+            text = text.replace('\u2013', '-')   # ?
+            text = text.replace('\u2014', '--')  # ?
             
             # Encode to ASCII, replacing any remaining problematic characters
             return text.encode('ascii', 'replace').decode('ascii')
         except Exception:
             # If all else fails, return a safe version
             return str(text).encode('ascii', 'replace').decode('ascii')
+
+    def ask_llm_with_context(self, prompt: str, page_context: dict = None, max_tokens: int = 1500) -> str:
+        """
+        Generic method to ask the LLM with a prompt and optional page context.
+        Used by fallback systems and other generic LLM interactions.
+        """
+        try:
+            system_prompt = "You are an expert web automation assistant. Generate precise JavaScript code for web interactions."
+            
+            if page_context:
+                context_info = f"\nPage Context: {json.dumps(page_context, indent=2)}\n"
+                user_content = context_info + prompt
+            else:
+                user_content = prompt
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+            
+            self.logger.info(f"Sending to LLM (ask_llm_with_context):\nPrompt: {prompt[:200]}...")
+            
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                max_tokens=max_tokens
+            )
+            
+            response = chat_completion.choices[0].message.content.strip()
+            self.logger.info(f"Received from LLM (ask_llm_with_context):\n{response[:200]}...")
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error in ask_llm_with_context: {e}")
+            return ""
+            
     def generate_action_from_page_info(self, goal: str, remaining_steps: list[str], completed_steps: list[str], page_info: Dict) -> dict:
         """
         Generates a JSON command based on the current page interactive elements and goal.
@@ -253,6 +290,15 @@ class LLMController:
         4. Keep steps sequential and non-redundant
         5. Only include verification for page navigation (optional)
         6. NEVER suggest copy/paste or print actions for data extraction.
+        
+        LOGIN/AUTH DETECTION:
+        If the goal requires accessing a service that typically needs authentication (Twitter/X, Facebook, Instagram, LinkedIn, private accounts, user dashboards), 
+        include a manual intervention step FIRST:
+        - "Navigate to [website]"  
+        - "MANUAL_INTERVENTION: Complete login process if required"
+        - Then continue with main goal steps
+        
+        Common sites requiring auth: x.com, twitter.com, facebook.com, instagram.com, linkedin.com, gmail.com, outlook.com, etc.
         
         DATA EXTRACTION TASKS:
         When the goal involves extracting data, getting information, downloading content to files (Excel, Word, TXT), 

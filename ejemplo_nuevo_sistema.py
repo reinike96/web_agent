@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Ejemplo de uso del nuevo sistema de procesamiento de contenido
-Demuestra el flujo completo: extracción → LLM → consolidación → archivo final
+Demuestra el flujo completo: extracci?n ? LLM ? consolidaci?n ? archivo final
 """
 import sys
 import os
@@ -15,17 +15,17 @@ from safe_print_utils import safe_print_global as safe_print
 
 def ejemplo_amazon_zapatillas():
     """
-    Ejemplo: Extraer zapatillas >10€ de Amazon en 3 páginas → Excel
+    Ejemplo: Extraer zapatillas >10? de Amazon en 3 p?ginas ? Excel
     """
-    safe_print("=== EJEMPLO: AMAZON ZAPATILLAS → EXCEL ===")
+    safe_print("=== EJEMPLO: AMAZON ZAPATILLAS ? EXCEL ===")
     
     # PASO 1: Objetivo del usuario
-    objetivo = "Extraer los nombres y precios de las zapatillas que cuestan más de 10 euros en las 3 primeras páginas de amazon.de"
+    objetivo = "Extraer los nombres y precios de las zapatillas que cuestan m?s de 10 euros en las 3 primeras p?ginas de amazon.de"
     
     safe_print(f"[OBJETIVO] {objetivo}")
     safe_print("")
     
-    # PASO 2: Plan de ejecución
+    # PASO 2: Plan de ejecuci?n
     plan = [
         "1. Navigate to https://www.amazon.de",
         "2. Search for 'zapatillas'", 
@@ -42,32 +42,32 @@ def ejemplo_amazon_zapatillas():
         safe_print(f"  {step}")
     safe_print("")
     
-    # PASO 3: Flujo técnico detallado
-    safe_print("[FLUJO TÉCNICO] Lo que sucede internamente:")
+    # PASO 3: Flujo t?cnico detallado
+    safe_print("[FLUJO T?CNICO] Lo que sucede internamente:")
     safe_print("")
     
-    safe_print("📄 POR CADA PÁGINA (1, 2, 3):")
+    safe_print("[DOCUMENT] POR CADA P?GINA (1, 2, 3):")
     safe_print("  1. extract_page_content():")
-    safe_print("     • Ejecuta extractText.js en la página actual")  
-    safe_print("     • El JS extrae texto limpio y lo imprime en consola")
-    safe_print("     • Python captura el texto de los logs del browser")
-    safe_print("     • Guarda en memoria: {page_number, url, title, content}")
+    safe_print("     ? Ejecuta extractText.js en la p?gina actual")  
+    safe_print("     ? El JS extrae texto limpio y lo imprime en consola")
+    safe_print("     ? Python captura el texto de los logs del browser")
+    safe_print("     ? Guarda en memoria: {page_number, url, title, content}")
     safe_print("")
     
     safe_print("  2. process_page_with_llm():")
-    safe_print("     • Envía contenido + objetivo original al LLM")
-    safe_print("     • Prompt: 'Extrae zapatillas >10€ de este contenido'")
-    safe_print("     • LLM devuelve JSON estructurado con productos")
-    safe_print("     • Guarda resultado procesado en memoria")
+    safe_print("     ? Env?a contenido + objetivo original al LLM")
+    safe_print("     ? Prompt: 'Extrae zapatillas >10? de este contenido'")
+    safe_print("     ? LLM devuelve JSON estructurado con productos")
+    safe_print("     ? Guarda resultado procesado en memoria")
     safe_print("")
     
-    safe_print("🔄 DESPUÉS DE PROCESAR LAS 3 PÁGINAS:")
+    safe_print("[PROCESSING] DESPU?S DE PROCESAR LAS 3 P?GINAS:")
     safe_print("  3. generate_final_document():")
-    safe_print("     • Consolida los 3 resultados del LLM")
-    safe_print("     • Prompt: 'Combina estos resultados en informe final'")
-    safe_print("     • Genera Excel con resumen + detalles por página")
-    safe_print("     • Usuario elige destino del archivo")
-    safe_print("     • Limpia memoria automáticamente")
+    safe_print("     ? Consolida los 3 resultados del LLM")
+    safe_print("     ? Prompt: 'Combina estos resultados en informe final'")
+    safe_print("     ? Genera Excel con resumen + detalles por p?gina")
+    safe_print("     ? Usuario elige destino del archivo")
+    safe_print("     ? Limpia memoria autom?ticamente")
     safe_print("")
     
     # PASO 4: Estructura de datos en memoria
@@ -75,7 +75,7 @@ def ejemplo_amazon_zapatillas():
     safe_print("")
     safe_print("extracted_pages = [")
     safe_print("  {page_number: 1, url: 'amazon.de/s?k=zapatillas&page=1',")
-    safe_print("   title: 'Amazon.de: zapatillas', content: '...(texto extraído)...'},")
+    safe_print("   title: 'Amazon.de: zapatillas', content: '...(texto extra?do)...'},")
     safe_print("  {page_number: 2, url: 'amazon.de/s?k=zapatillas&page=2', ...},")
     safe_print("  {page_number: 3, url: 'amazon.de/s?k=zapatillas&page=3', ...}")
     safe_print("]")
@@ -89,33 +89,33 @@ def ejemplo_amazon_zapatillas():
     
     # PASO 5: Archivo final
     safe_print("[RESULTADO] Archivo Excel generado:")
-    safe_print("  📊 Hoja 'Resumen':")
-    safe_print("     • Objetivo original")
-    safe_print("     • Fecha de extracción") 
-    safe_print("     • Total de páginas procesadas")
-    safe_print("     • Resultados consolidados del LLM")
+    safe_print("  [DATA] Hoja 'Resumen':")
+    safe_print("     ? Objetivo original")
+    safe_print("     ? Fecha de extracci?n") 
+    safe_print("     ? Total de p?ginas procesadas")
+    safe_print("     ? Resultados consolidados del LLM")
     safe_print("")
-    safe_print("  📋 Hoja 'Detalles por Página':")
-    safe_print("     • Tabla con página, título, URL, caracteres")
+    safe_print("  [LIST] Hoja 'Detalles por P?gina':")
+    safe_print("     ? Tabla con p?gina, t?tulo, URL, caracteres")
     safe_print("")
-    safe_print("  💾 Usuario elige destino (ej: 'zapatillas_amazon_20250122.xlsx')")
+    safe_print("  [SAVE] Usuario elige destino (ej: 'zapatillas_amazon_20250122.xlsx')")
     safe_print("")
     
     return True
 
 def ejemplo_wikipedia_articulo():
     """
-    Ejemplo: Extraer artículo de Wikipedia → Word procesado por LLM
+    Ejemplo: Extraer art?culo de Wikipedia ? Word procesado por LLM
     """
-    safe_print("=== EJEMPLO: WIKIPEDIA ARTÍCULO → WORD ===")
+    safe_print("=== EJEMPLO: WIKIPEDIA ART?CULO ? WORD ===")
     
-    objetivo = "Ir a Wikipedia, extraer toda la información del artículo sobre 'Machine Learning' y generar un resumen ejecutivo en Word"
+    objetivo = "Ir a Wikipedia, extraer toda la informaci?n del art?culo sobre 'Machine Learning' y generar un resumen ejecutivo en Word"
     
     safe_print(f"[OBJETIVO] {objetivo}")
     safe_print("")
     
     plan = [
-        "1. Navigate to https://es.wikipedia.org/wiki/Aprendizaje_automático",
+        "1. Navigate to https://es.wikipedia.org/wiki/Aprendizaje_autom?tico",
         "2. Extract and process current page (extract_and_process_current_page)",
         "3. Generate final Word document (generate_final_document)"
     ]
@@ -125,18 +125,18 @@ def ejemplo_wikipedia_articulo():
         safe_print(f"  {step}")
     safe_print("")
     
-    safe_print("[FLUJO TÉCNICO] Para artículo único:")
-    safe_print("  1. extractText.js extrae todo el contenido del artículo")
-    safe_print("  2. LLM procesa: 'Crea resumen ejecutivo de este artículo'")
+    safe_print("[FLUJO T?CNICO] Para art?culo ?nico:")
+    safe_print("  1. extractText.js extrae todo el contenido del art?culo")
+    safe_print("  2. LLM procesa: 'Crea resumen ejecutivo de este art?culo'")
     safe_print("  3. generate_final_document formato='word'")
     safe_print("  4. Usuario elige destino (ej: 'machine_learning_resumen.docx')")
     safe_print("")
     
     safe_print("[RESULTADO] Documento Word:")
-    safe_print("  📄 Título: 'INFORME DE EXTRACCIÓN DE DATOS WEB'")
-    safe_print("  📋 Información general (objetivo, fecha, páginas)")
+    safe_print("  [DOCUMENT] T?tulo: 'INFORME DE EXTRACCI?N DE DATOS WEB'")
+    safe_print("  [LIST] Informaci?n general (objetivo, fecha, p?ginas)")
     safe_print("  📖 Resumen ejecutivo procesado por LLM")
-    safe_print("  📊 Tabla con detalles de la página")
+    safe_print("  [DATA] Tabla con detalles de la p?gina")
     safe_print("")
     
     return True
@@ -148,33 +148,33 @@ def mostrar_ventajas_sistema():
     safe_print("=== VENTAJAS DEL NUEVO SISTEMA ===")
     safe_print("")
     
-    safe_print("🚀 MEJORAS IMPLEMENTADAS:")
-    safe_print("  ✅ Sin archivos temporales - todo en memoria")
-    safe_print("  ✅ JavaScript optimizado para extracción limpia") 
-    safe_print("  ✅ LLM procesa cada página individualmente")
-    safe_print("  ✅ Consolidación inteligente de resultados")
-    safe_print("  ✅ Usuario elige formato y destino del archivo")
-    safe_print("  ✅ Limpieza automática de memoria")
-    safe_print("  ✅ Compatible con cualquier sitio web")
+    safe_print("[LAUNCH] MEJORAS IMPLEMENTADAS:")
+    safe_print("  [SUCCESS] Sin archivos temporales - todo en memoria")
+    safe_print("  [SUCCESS] JavaScript optimizado para extracci?n limpia") 
+    safe_print("  [SUCCESS] LLM procesa cada p?gina individualmente")
+    safe_print("  [SUCCESS] Consolidaci?n inteligente de resultados")
+    safe_print("  [SUCCESS] Usuario elige formato y destino del archivo")
+    safe_print("  [SUCCESS] Limpieza autom?tica de memoria")
+    safe_print("  [SUCCESS] Compatible con cualquier sitio web")
     safe_print("")
     
-    safe_print("📋 FORMATOS SOPORTADOS:")
-    safe_print("  📊 Excel (.xlsx) - Perfecto para datos estructurados")
-    safe_print("  📄 Word (.docx) - Ideal para informes y artículos")
-    safe_print("  🔧 Extensible a otros formatos")
+    safe_print("[LIST] FORMATOS SOPORTADOS:")
+    safe_print("  [DATA] Excel (.xlsx) - Perfecto para datos estructurados")
+    safe_print("  [DOCUMENT] Word (.docx) - Ideal para informes y art?culos")
+    safe_print("  [TOOLS] Extensible a otros formatos")
     safe_print("")
     
-    safe_print("🎯 CASOS DE USO:")
+    safe_print("[TARGET] CASOS DE USO:")
     safe_print("  🛒 E-commerce: Productos, precios, reviews")
-    safe_print("  📚 Investigación: Artículos, papers, documentación") 
-    safe_print("  📊 Análisis: Datos de mercado, competencia")
+    safe_print("  [BOOKS] Investigaci?n: Art?culos, papers, documentaci?n") 
+    safe_print("  [DATA] An?lisis: Datos de mercado, competencia")
     safe_print("  📰 Contenido: Noticias, blogs, foros")
     safe_print("")
     
     return True
 
 if __name__ == "__main__":
-    safe_print("🎯 EJEMPLOS DEL NUEVO SISTEMA DE PROCESAMIENTO")
+    safe_print("[TARGET] EJEMPLOS DEL NUEVO SISTEMA DE PROCESAMIENTO")
     safe_print("=" * 60)
     safe_print("")
     
@@ -189,13 +189,13 @@ if __name__ == "__main__":
     # Ventajas del sistema
     mostrar_ventajas_sistema()
     
-    safe_print("🎉 SISTEMA COMPLETAMENTE IMPLEMENTADO Y LISTO!")
+    safe_print("[CELEBRATE] SISTEMA COMPLETAMENTE IMPLEMENTADO Y LISTO!")
     safe_print("")
     safe_print("Para usar el sistema:")
     safe_print("1. Configurar: set GROQ_API_KEY=tu_clave_aqui")
     safe_print("2. Ejecutar: python main.py") 
     safe_print("3. Usar las nuevas acciones en el plan del LLM:")
-    safe_print("   • extract_and_process_current_page")
-    safe_print("   • generate_final_document")
+    safe_print("   ? extract_and_process_current_page")
+    safe_print("   ? generate_final_document")
     safe_print("")
-    safe_print("El LLM automáticamente elegirá estas acciones según el objetivo!")
+    safe_print("El LLM autom?ticamente elegir? estas acciones seg?n el objetivo!")

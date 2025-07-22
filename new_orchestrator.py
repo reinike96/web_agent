@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from typing import Dict, List
 from browser_controller import BrowserController
 from page_analyzer import PageAnalyzer
@@ -41,7 +42,9 @@ class NewOrchestrator:
         self.text_processor_agent = TextProcessorAgent(self.llm.client)  # Initialize text processor agent
         
         # Inicializar el controlador de acciones mejorado
-        self.enhanced_action_controller = EnhancedActionController(self.browser, self.llm)
+        import logging
+        logger = logging.getLogger(__name__)
+        self.enhanced_action_controller = EnhancedActionController(self.browser, self.memory, logger, self.llm)
         
         # Inicializar procesadores de contenido y generador de archivos
         self.content_processor = ContentProcessor(self.browser, self.llm)
@@ -50,40 +53,72 @@ class NewOrchestrator:
         self.plan = []
         self.completed_steps = []
         self.current_step_index = 0
+        self.objective_completed = False  # Flag to track if objective was completed by auto-trigger
         
-        # Control de navegación mejorada
+        # Control de navegaci?n mejorada
         self.extracted_urls = set()  # URLs ya procesadas para evitar loops
-        self.current_page_number = 1  # Número de página actual
-        self.pages_extracted = 0  # Páginas ya extraídas
+        self.current_page_number = 1  # N?mero de p?gina actual
+        self.pages_extracted = 0  # P?ginas ya extra?das
     
     def safe_print(self, text: str):
         """Print text with Unicode character cleaning to avoid encoding issues."""
         try:
             # Clean emojis and Unicode characters that cause encoding issues
-            cleaned_text = text
+            cleaned_text = str(text)
             
             # Replace common problematic emojis and Unicode characters
             emoji_replacements = {
-                '🎯': '[TARGET]',
-                '🔧': '[TOOL]',
+                '[TARGET]': '[TARGET]',
+                '[TOOLS]': '[TOOL]',
                 '📡': '[SIGNAL]',
-                '🔍': '[SEARCH]',
-                '❌': '[ERROR]',
-                '✅': '[SUCCESS]', 
-                '⚠️': '[WARNING]',
-                '🌐': '[WEB]',
-                '📊': '[DATA]',
-                '📁': '[FILE]',
-                '🔄': '[RELOAD]',
-                '⏳': '[WAIT]',
+                '[SEARCH]': '[SEARCH]',
+                '[ERROR]': '[ERROR]',
+                '[SUCCESS]': '[SUCCESS]', 
+                '[WARNING]': '[WARNING]',
+                '[WEB]': '[WEB]',
+                '[DATA]': '[DATA]',
+                '[FILE]': '[FILE]',
+                '[PROCESSING]': '[RELOAD]',
+                '?': '[WAIT]',
                 '📜': '[SCROLL]',
-                '🚀': '[START]',
-                '💡': '[IDEA]',
-                '🎉': '[COMPLETE]'
+                '[LAUNCH]': '[START]',
+                '[IDEA]': '[IDEA]',
+                '[CELEBRATE]': '[COMPLETE]',
+                '[AI]': '[AI]',
+                '?': '[FAST]',
+                '[LIST]': '[LIST]',
+                '[CLICK]': '[CLICK]',
+                '[SKIP]': '[SKIP]',
+                '🔁': '[RETRY]',
+                '📝': '[TEXT]'
             }
             
+            # First pass: replace known emojis
             for emoji, replacement in emoji_replacements.items():
                 cleaned_text = cleaned_text.replace(emoji, replacement)
+            
+            # Second pass: remove any remaining problematic Unicode characters
+            # This handles characters that might not be in our replacement list
+            import re
+            # Remove emojis and other high unicode characters that cause issues
+            cleaned_text = re.sub(r'[\U00010000-\U0010ffff]', '[EMOJI]', cleaned_text)
+            
+            # Final cleanup: ensure we can encode to the console's encoding
+            try:
+                # Try to encode/decode to catch remaining problematic characters
+                cleaned_text = cleaned_text.encode('utf-8', errors='replace').decode('utf-8')
+            except:
+                # Ultimate fallback
+                cleaned_text = cleaned_text.encode('ascii', errors='replace').decode('ascii')
+            
+            print(cleaned_text)
+            
+        except Exception as e:
+            # Ultimate fallback - print something safe
+            try:
+                print(f"[Message with encoding issues - {str(e)}]")
+            except:
+                print("[Message with severe encoding issues - unable to display]")
             
             # Remove any remaining problematic Unicode characters
             cleaned_text = cleaned_text.encode('ascii', 'replace').decode('ascii')
@@ -109,12 +144,18 @@ class NewOrchestrator:
         for i, task in enumerate(self.plan):
             self.safe_print(f"{i+1}. {task}")
 
-        while self.current_step_index < len(self.plan):
+        while self.current_step_index < len(self.plan) and not self.objective_completed:
             current_task = self.plan[self.current_step_index]
             
             self.safe_print(f"\n--- Executing Step {self.current_step_index + 1}: {current_task} ---")
             
             success = self.execute_step_with_retries(current_task)
+            
+            # Check if objective was completed during step execution (auto-trigger)
+            if self.objective_completed:
+                self.safe_print(f"[OBJECTIVE-COMPLETE] Auto-trigger completed the objective during step {self.current_step_index + 1}")
+                self.completed_steps.append(current_task)
+                break
             
             if success:
                 self.safe_print(f"[OK] Step {self.current_step_index + 1} completed successfully!")
@@ -129,7 +170,10 @@ class NewOrchestrator:
                     self.safe_print("Failed to find alternative approach. Aborting.")
                     break
 
-        completion_message = "--- All Tasks Completed ---"
+        if self.objective_completed:
+            completion_message = "--- Objective Completed Successfully via Auto-Processing ---"
+        else:
+            completion_message = "--- All Tasks Completed ---"
         print(completion_message)
         if self.message_callback:
             self.message_callback(completion_message)
@@ -246,12 +290,47 @@ class NewOrchestrator:
             self.safe_print(f"[ERROR] Verification failed: {verification_result.get('reason', 'Unknown reason')}")
             return False
 
+    def is_manual_intervention_step(self, task: str) -> bool:
+        """Check if a task explicitly requires manual intervention."""
+        clean_task = task.strip().upper()
+        return "MANUAL_INTERVENTION" in clean_task or "MANUAL INTERVENTION" in clean_task
+
+    def execute_manual_intervention_step(self, task: str) -> bool:
+        """Execute a manual intervention step."""
+        self.safe_print(f"Manual intervention step detected: {task}")
+        
+        # Extract the description after MANUAL_INTERVENTION:
+        intervention_description = task
+        if "MANUAL_INTERVENTION:" in task:
+            intervention_description = task.split("MANUAL_INTERVENTION:", 1)[1].strip()
+        elif "MANUAL INTERVENTION:" in task:
+            intervention_description = task.split("MANUAL INTERVENTION:", 1)[1].strip()
+        
+        # Show manual intervention dialog
+        intervention_info = {
+            "type": "planned_intervention",
+            "message": f"Manual action required: {intervention_description}",
+            "details": "This step was planned as part of the task execution."
+        }
+        
+        user_completed = self.handle_manual_intervention(intervention_info)
+        if user_completed:
+            self.safe_print("[OK] User completed manual intervention step.")
+            return True
+        else:
+            self.safe_print("[CANCELLED] User cancelled manual intervention.")
+            return False
+
     def execute_step_with_retries(self, task: str) -> bool:
         """Execute a step with 3 progressive retry strategies."""
         
         # Check if this is a verification step
         if self.is_verification_step(task):
             return self.execute_verification_step(task)
+        
+        # Check if this is a manual intervention step
+        if self.is_manual_intervention_step(task):
+            return self.execute_manual_intervention_step(task)
         
         max_attempts = 2
         
@@ -447,58 +526,67 @@ class NewOrchestrator:
             self.safe_print("No action specified.")
             return False
 
-        # Obtener información actual de la página ANTES de ejecutar la acción
+        # Obtener informaci?n actual de la p?gina ANTES de ejecutar la acci?n
         page_info = self.page_analyzer.get_comprehensive_page_info()
         
-        self.safe_print(f"\n🎯 Executing Enhanced Action: {action_name}")
+        self.safe_print(f"\n[TARGET] Executing Enhanced Action: {action_name}")
         self.safe_print(f"Parameters: {params}")
         
-        # Usar el controlador de acciones mejorado para acciones básicas
+        # Usar el controlador de acciones mejorado para acciones b?sicas
         enhanced_actions = ["click_element", "enter_text", "enter_text_no_enter", "click_button"]
         
         if action_name in enhanced_actions:
-            self.safe_print(f"📡 Using Enhanced Action Controller for {action_name}")
+            self.safe_print(f"? Using Hybrid Action Controller (Programmatic + LLM Fallback) for {action_name}")
             
-            # Verificar si la acción es redundante en el contexto actual
+            # Verificar si la acci?n es redundante en el contexto actual
             current_state = self.enhanced_action_controller._analyze_page_state(page_info)
             should_skip, skip_reason = self.enhanced_action_controller.should_skip_action_based_on_context(action, current_state)
             
             if should_skip:
-                self.safe_print(f"⏭️  Skipping action: {skip_reason}")
+                self.safe_print(f"[SKIP] Skipping action: {skip_reason}")
                 return True
             
-            # Ejecutar con retroalimentación completa
-            result = self.enhanced_action_controller.execute_action_with_feedback(action, page_info)
+            # Ejecutar con m?todo h?brido: program?tico primero, LLM fallback si falla
+            result = self.enhanced_action_controller.execute_action_with_llm_fallback(action, page_info)
             
-            # Mostrar retroalimentación detallada
+            # Mostrar informaci?n sobre qu? m?todo fue usado
+            method_used = result.get("method_used", "unknown")
+            if method_used == "programmatic":
+                self.safe_print(f"[SUCCESS] [HYBRID] Successful using programmatic method")
+            elif method_used == "llm_fallback":
+                self.safe_print(f"[AI] [HYBRID] Successful using LLM fallback after programmatic failure")
+                if result.get("programmatic_failure"):
+                    self.safe_print(f"[LIST] [DEBUG] Programmatic failure reason: {result['programmatic_failure'].get('message', 'Unknown')}")
+            
+            # Mostrar retroalimentaci?n detallada
             feedback = self.enhanced_action_controller.get_action_feedback_for_llm(action, result)
-            self.safe_print(f"🔍 Action Feedback:\n{feedback}")
+            self.safe_print(f"[SEARCH] Action Feedback:\n{feedback}")
             
-            # Si la acción falló, proporcionar contexto para el próximo intento
+            # Si la acci?n fall?, proporcionar contexto para el pr?ximo intento
             if not result.get("success", False):
                 self.safe_print(f"[ERROR] Action failed. Providing detailed context for next iteration...")
                 
-                # Re-analizar página después del fallo para obtener información actualizada
+                # Re-analizar p?gina despu?s del fallo para obtener informaci?n actualizada
                 updated_page_info = self.page_analyzer.get_comprehensive_page_info()
                 
                 # Extraer elementos interactivos actualizados para debug
                 elements = updated_page_info.get('interactive_elements', {}).get('elements', [])
-                self.safe_print(f"🔍 Current page has {len(elements)} interactive elements")
+                self.safe_print(f"[SEARCH] Current page has {len(elements)} interactive elements")
                 
                 # Mostrar algunos elementos disponibles para debug
                 if elements:
-                    self.safe_print("📋 Available elements for next attempt:")
+                    self.safe_print("[LIST] Available elements for next attempt:")
                     for i, elem in enumerate(elements[:5]):  # Mostrar solo los primeros 5
                         self.safe_print(f"  {i+1}. {elem.get('tag', 'unknown')} - {elem.get('text', 'no text')[:50]}")
                         self.safe_print(f"     Selector: {elem.get('selector', 'no selector')}")
                 
-                # El LLM recibirá esta información actualizada en el próximo ciclo
+                # El LLM recibir? esta informaci?n actualizada en el pr?ximo ciclo
                 return False
             
             self.safe_print(f"[SUCCESS] Enhanced action completed successfully")
             return True
 
-        # Usar la implementación original para acciones especiales
+        # Usar la implementaci?n original para acciones especiales
         return self.execute_action(action)
 
     def execute_action(self, action: Dict) -> bool:
@@ -525,12 +613,18 @@ class NewOrchestrator:
                 text = params.get("text", "")
                 success = self.browser.enter_text_without_enter(selector, text)
                 
-                # For contenteditable elements, verify the content was accepted
+                # For contenteditable elements, verify the content was accepted and page detected it
                 if success:
                     self.safe_print("Verifying that the text input was detected properly...")
-                    # Small delay to allow page to process the input
-                    time.sleep(1)
-                    # Note: Post-action verification will be handled by the verification system if needed
+                    # Give extra time for modern SPAs to process the input
+                    time.sleep(2)
+                    
+                    # Use enhanced verification
+                    input_detected = self.browser.verify_text_input_detected(selector, text, timeout=3)
+                    if input_detected:
+                        self.safe_print("[SUCCESS] Text input verified - page detected the content")
+                    else:
+                        self.safe_print("[WARNING] Text input verification inconclusive - continuing anyway")
                 
                 return success
                 
@@ -648,15 +742,23 @@ class NewOrchestrator:
                                 
                                 # Execute without capturing output so user sees the progress and dialog
                                 result = subprocess.Popen([
-                                    'python', script_path
+                                    'python', script_path, '--goal', self.goal
                                 ], cwd=os.path.dirname(__file__))
                                 
-                                self.safe_print("[AUTO-PROCESS] Document processing started")
+                                self.safe_print(f"[AUTO-PROCESS] Document processing started with goal: {self.goal}")
                                 self.safe_print(f"[AUTO-PROCESS] Process ID: {result.pid}")
                                 
                                 # Wait for process to complete
                                 result.wait()
                                 self.safe_print("[AUTO-PROCESS] Document processing completed")
+                                
+                                # If auto-trigger was successful, mark the objective as complete
+                                if result.returncode == 0:
+                                    self.safe_print("[AUTO-SUCCESS] Document generated successfully, objective completed!")
+                                    # Set flag to indicate objective is completed
+                                    self.objective_completed = True
+                                else:
+                                    self.safe_print("[AUTO-WARNING] Document processing had issues, continuing with normal flow...")
                                 
                             else:
                                 self.safe_print("[ERROR] Processing script not found")
@@ -736,7 +838,7 @@ class NewOrchestrator:
                                 self.safe_print("[SUCCESS] Procesamiento completado exitosamente!")
                                 return True
                             else:
-                                self.safe_print(f"[ERROR] Error en procesamiento: código {result.returncode}")
+                                self.safe_print(f"[ERROR] Error en procesamiento: c?digo {result.returncode}")
                                 return False
                         else:
                             self.safe_print("[ERROR] Script de procesamiento no encontrado")
@@ -776,24 +878,24 @@ class NewOrchestrator:
                     return False
             
             elif action_name == "extract_page_content":
-                # Nueva acción: extraer contenido de página actual usando JavaScript
+                # Nueva acci?n: extraer contenido de p?gina actual usando JavaScript
                 page_number = params.get("page_number", self.current_page_number)
                 
                 page_data = self.content_processor.extract_page_content(page_number)
                 if page_data:
-                    self.safe_print(f"[SUCCESS] Contenido extraído de página {page_number}")
-                    self.safe_print(f"[INFO] Caracteres extraídos: {page_data['content_length']}")
+                    self.safe_print(f"[SUCCESS] Contenido extra?do de p?gina {page_number}")
+                    self.safe_print(f"[INFO] Caracteres extra?dos: {page_data['content_length']}")
                     return True
                 else:
-                    self.safe_print(f"[ERROR] No se pudo extraer contenido de página {page_number}")
+                    self.safe_print(f"[ERROR] No se pudo extraer contenido de p?gina {page_number}")
                     return False
             
             elif action_name == "process_page_with_llm":
-                # Nueva acción: procesar página extraída con LLM
+                # Nueva acci?n: procesar p?gina extra?da con LLM
                 page_number = params.get("page_number", self.current_page_number)
                 original_objective = params.get("objective", self.goal)
                 
-                # Buscar la página en memoria
+                # Buscar la p?gina en memoria
                 page_data = None
                 for page in self.content_processor.extracted_pages:
                     if page.get('page_number') == page_number:
@@ -801,24 +903,24 @@ class NewOrchestrator:
                         break
                 
                 if not page_data:
-                    self.safe_print(f"[ERROR] No se encontró datos de página {page_number} en memoria")
+                    self.safe_print(f"[ERROR] No se encontr? datos de p?gina {page_number} en memoria")
                     return False
                 
                 result = self.content_processor.process_page_with_llm(page_data, original_objective)
                 if result:
-                    self.safe_print(f"[SUCCESS] Página {page_number} procesada por LLM")
+                    self.safe_print(f"[SUCCESS] P?gina {page_number} procesada por LLM")
                     return True
                 else:
-                    self.safe_print(f"[ERROR] Error procesando página {page_number} con LLM")
+                    self.safe_print(f"[ERROR] Error procesando p?gina {page_number} con LLM")
                     return False
             
             elif action_name == "extract_and_process_current_page":
-                # Acción combinada: extraer y procesar página actual
+                # Acci?n combinada: extraer y procesar p?gina actual
                 page_number = params.get("page_number", self.current_page_number)
                 original_objective = params.get("objective", self.goal)
                 
                 # Paso 1: Extraer contenido
-                self.safe_print(f"[STEP 1] Extrayendo contenido de página {page_number}...")
+                self.safe_print(f"[STEP 1] Extrayendo contenido de p?gina {page_number}...")
                 page_data = self.content_processor.extract_page_content(page_number)
                 
                 if not page_data:
@@ -830,15 +932,15 @@ class NewOrchestrator:
                 result = self.content_processor.process_page_with_llm(page_data, original_objective)
                 
                 if result:
-                    self.safe_print(f"[SUCCESS] Página {page_number} extraída y procesada completamente")
-                    self.current_page_number += 1  # Incrementar para la próxima página
+                    self.safe_print(f"[SUCCESS] P?gina {page_number} extra?da y procesada completamente")
+                    self.current_page_number += 1  # Incrementar para la pr?xima p?gina
                     return True
                 else:
                     self.safe_print(f"[ERROR] Error en procesamiento con LLM")
                     return False
             
             elif action_name == "generate_final_document":
-                # Nueva acción: generar documento final consolidado
+                # Nueva acci?n: generar documento final consolidado
                 output_format = params.get("format", "excel").lower()
                 
                 # Verificar que hay datos procesados
@@ -875,7 +977,7 @@ class NewOrchestrator:
                 if file_path:
                     self.safe_print(f"[SUCCESS] Documento generado: {file_path}")
                     
-                    # Mostrar diálogo de éxito
+                    # Mostrar di?logo de ?xito
                     self.file_generator.show_success_dialog(file_path)
                     
                     # Limpiar memoria
@@ -888,23 +990,23 @@ class NewOrchestrator:
                     return False
             
             elif action_name == "show_memory_status":
-                # Acción de debug: mostrar estado de la memoria
+                # Acci?n de debug: mostrar estado de la memoria
                 summary = self.content_processor.get_memory_summary()
                 
                 self.safe_print("=== ESTADO DE LA MEMORIA ===")
-                self.safe_print(f"Páginas extraídas: {summary['pages_extracted']}")
-                self.safe_print(f"Páginas procesadas: {summary['pages_processed']}")
+                self.safe_print(f"P?ginas extra?das: {summary['pages_extracted']}")
+                self.safe_print(f"P?ginas procesadas: {summary['pages_processed']}")
                 self.safe_print(f"Total caracteres: {summary['total_content_chars']:,}")
                 
                 if summary['pages_info']:
-                    self.safe_print("\nDetalle de páginas:")
+                    self.safe_print("\nDetalle de p?ginas:")
                     for page_info in summary['pages_info']:
-                        self.safe_print(f"  Página {page_info['page_number']}: {page_info['title']} ({page_info['content_length']} chars)")
+                        self.safe_print(f"  P?gina {page_info['page_number']}: {page_info['title']} ({page_info['content_length']} chars)")
                 
                 return True
             
             elif action_name == "process_temp_files_to_excel":
-                # Nueva acción: procesar archivos temporales existentes a Excel
+                # Nueva acci?n: procesar archivos temporales existentes a Excel
                 self.safe_print("[EXCEL] Procesando archivos temporales a Excel...")
                 
                 try:
@@ -925,7 +1027,7 @@ class NewOrchestrator:
                             self.safe_print("[SUCCESS] Excel generado exitosamente!")
                             return True
                         else:
-                            self.safe_print(f"[ERROR] Error generando Excel: código {result.returncode}")
+                            self.safe_print(f"[ERROR] Error generando Excel: c?digo {result.returncode}")
                             return False
                     else:
                         self.safe_print("[ERROR] Script de procesamiento no encontrado")

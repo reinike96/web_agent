@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.common.by import By
@@ -14,6 +15,71 @@ from selenium.common.exceptions import (
     StaleElementReferenceException
 )
 from selenium.webdriver.edge.options import Options as EdgeOptions
+
+def safe_print(text):
+    """Print text safely, replacing Unicode characters that may cause encoding issues."""
+    # Dictionary of emoji/Unicode replacements
+    emoji_replacements = {
+        '[AI]': '[AI]',
+        '[SUCCESS]': '[SUCCESS]',
+        '[ERROR]': '[ERROR]',
+        '[WARNING]': '[WARNING]',
+        '[SEARCH]': '[SEARCH]',
+        '[DATA]': '[DATA]',
+        '📝': '[TEXT]',
+        '[PROCESSING]': '[PROCESSING]',
+        '[CLICK]': '[CLICK]',
+        '[IDEA]': '[INFO]',
+        '[TARGET]': '[TARGET]',
+        '?': '[TIME]',
+        '[LAUNCH]': '[LAUNCH]',
+        '[TOOLS]': '[TOOLS]',
+        '[LIST]': '[CLIPBOARD]',
+        '[SAVE]': '[SAVE]',
+        '[WEB]': '[WEB]',
+        '[LINK]': '[LINK]',
+        '[MOBILE]': '[MOBILE]',
+        '[DESKTOP]': '[DESKTOP]',
+        '[STAR]': '[STAR]',
+        '[CELEBRATE]': '[CELEBRATE]',
+        '[STOP]': '[STOP]',
+        '[PLAY]': '[PLAY]',
+        '[PAUSE]': '[PAUSE]',
+        '[STOP]': '[STOP]',
+        '[AUDIO]': '[AUDIO]',
+        '[MUTE]': '[MUTE]',
+        '[DOCUMENT]': '[DOCUMENT]',
+        '[FILE]': '[FOLDER]',
+        '[ARCHIVE]': '[ARCHIVE]',
+        '[CHART]': '[CHART]',
+        '[GRAPH]': '[GRAPH]',
+        '[TROPHY]': '[TROPHY]',
+        '[MEDAL]': '[MEDAL]',
+        '[GOLD]': '[GOLD]',
+        '[SILVER]': '[SILVER]',
+        '[BRONZE]': '[BRONZE]',
+        '[KEY]': '[KEY]',
+        '[EVENT]': '[EVENT]',
+        '[THEATER]': '[THEATER]',
+        '[ART]': '[ART]',
+        '[MUSIC]': '[MUSIC]',
+        '[MELODY]': '[MELODY]',
+    }
+    
+    # Replace known emojis first
+    safe_text = text
+    for emoji, replacement in emoji_replacements.items():
+        safe_text = safe_text.replace(emoji, replacement)
+    
+    # Remove any remaining high Unicode characters (above ASCII range)
+    safe_text = re.sub(r'[\u0080-\uffff]', '?', safe_text)
+    
+    try:
+        print(safe_text, flush=True)
+    except UnicodeEncodeError:
+        # If we still have encoding issues, try encoding to ASCII with replacement
+        ascii_text = safe_text.encode('ascii', errors='replace').decode('ascii')
+        print(ascii_text, flush=True)
 
 class BrowserController:
     def __init__(self):
@@ -246,7 +312,7 @@ class BrowserController:
     def safe_send_keys_rich_text(self, by: By, value: str, text: str, timeout: int = 10, retries: int = 1, press_enter: bool = True) -> bool:
         """
         Enhanced text entry method specifically for rich text editors like X.com.
-        Uses multiple strategies including simulated typing to ensure X.com detects the input.
+        Uses advanced typing simulation to ensure modern SPAs detect the input correctly.
         """
         for i in range(retries):
             try:
@@ -254,72 +320,157 @@ class BrowserController:
                     EC.visibility_of_element_located((by, value))
                 )
                 
-                # Strategy 1: For contenteditable elements (X.com), simulate real typing
-                if element.get_attribute("contenteditable") == "true":
-                    print(f"Using rich text strategy for contenteditable element...")
+                print(f"Attempting to type text using enhanced simulation...")
+                
+                # Strategy 1: Advanced simulation for contenteditable elements (X.com, Facebook, etc.)
+                if element.get_attribute("contenteditable") == "true" or "contenteditable" in element.get_attribute("class"):
+                    print(f"Using advanced contenteditable strategy...")
                     
-                    # Step 1: Clear existing content
-                    element.click()  # Focus the element
+                    # Step 1: Focus and prepare element
+                    element.click()
+                    time.sleep(0.3)
+                    
+                    # Clear existing content with more reliable method
+                    self.driver.execute_script("arguments[0].textContent = '';", element)
+                    self.driver.execute_script("arguments[0].innerHTML = '';", element)
                     time.sleep(0.2)
                     
-                    # Select all and delete
-                    element.send_keys(Keys.CONTROL + "a")
-                    time.sleep(0.1)
-                    element.send_keys(Keys.DELETE)
+                    # Step 2: Use JavaScript to simulate real user typing with all events
+                    success = self.driver.execute_script("""
+                        var element = arguments[0];
+                        var text = arguments[1];
+                        
+                        function simulateTyping(element, text) {
+                            // Focus element
+                            element.focus();
+                            
+                            // Clear any existing content
+                            element.textContent = '';
+                            element.innerHTML = '';
+                            
+                            // Use safer text insertion without problematic keyboard events
+                            // This avoids triggering keyboard shortcuts while still being detected by frameworks
+                            
+                            // Method 1: Direct text insertion with proper events
+                            element.textContent = text;
+                            
+                            // Simulate input event (crucial for modern frameworks)
+                            let inputEvent = new InputEvent('input', {
+                                data: text,
+                                inputType: 'insertText',
+                                bubbles: true,
+                                cancelable: false,
+                                composed: true
+                            });
+                            element.dispatchEvent(inputEvent);
+                            
+                            // Simulate change event for traditional forms
+                            let changeEvent = new Event('change', {
+                                bubbles: true,
+                                cancelable: true
+                            });
+                            element.dispatchEvent(changeEvent);
+                            
+                            // Trigger blur and focus to ensure validation
+                            element.blur();
+                            setTimeout(() => element.focus(), 10);
+                            
+                            // React-specific handling
+                            if (element._valueTracker) {
+                                element._valueTracker.setValue(text);
+                            }
+                            
+                            // Vue.js specific handling
+                            if (element.__vue__) {
+                                element.__vue__.$forceUpdate();
+                            }
+                            
+                            return element.textContent === text || element.innerText === text;
+                        }
+                        
+                        return simulateTyping(element, text);
+                    """, element, text)
+                    
+                    if success:
+                        safe_print(f"[SUCCESS] Advanced typing simulation successful")
+                    else:
+                        safe_print(f"[WARNING] Advanced simulation completed, verifying content...")
+                    
+                    # Additional verification and fallback
+                    time.sleep(0.5)
+                    current_content = element.get_attribute("textContent") or element.get_attribute("innerText") or ""
+                    
+                    if text not in current_content:
+                        safe_print(f"[PROCESSING] Fallback: Using safer JavaScript text insertion")
+                        self.driver.execute_script("""
+                            var element = arguments[0];
+                            var text = arguments[1];
+                            
+                            // Safer fallback that doesn't trigger shortcuts
+                            element.textContent = text;
+                            element.innerHTML = text;
+                            
+                            // Trigger only essential events
+                            let inputEvent = new InputEvent('input', { 
+                                data: text, 
+                                inputType: 'insertText', 
+                                bubbles: true 
+                            });
+                            element.dispatchEvent(inputEvent);
+                            
+                            let changeEvent = new Event('change', { bubbles: true });
+                            element.dispatchEvent(changeEvent);
+                        """, element, text)
+                
+                else:
+                    # Strategy 2: Enhanced method for regular inputs
+                    print(f"Using enhanced strategy for regular input element...")
+                    
+                    # Focus element
+                    element.click()
                     time.sleep(0.2)
                     
-                    # Step 2: Type character by character to simulate real typing
-                    for char in text:
-                        element.send_keys(char)
-                        time.sleep(0.05)  # Small delay between characters
+                    # Clear and type with events
+                    element.clear()
                     
-                    # Step 3: Trigger additional events that X.com might be listening for
+                    # Use JavaScript for better event handling on regular inputs too
                     self.driver.execute_script("""
                         var element = arguments[0];
                         var text = arguments[1];
                         
-                        // Ensure the text is set
-                        element.textContent = text;
+                        element.value = text;
                         
-                        // Trigger all possible events that X.com might be listening for
-                        var events = ['input', 'change', 'keyup', 'keydown', 'textInput', 'paste'];
-                        events.forEach(function(eventType) {
-                            var event = new Event(eventType, { 
-                                bubbles: true, 
-                                cancelable: true,
-                                composed: true 
-                            });
+                        // Trigger events that frameworks listen for (excluding keyup to avoid shortcuts)
+                        ['input', 'change', 'blur', 'focus'].forEach(eventType => {
+                            let event = new Event(eventType, { bubbles: true, cancelable: true });
                             element.dispatchEvent(event);
                         });
                         
-                        // Special handling for React/modern frameworks
+                        // React specific
                         if (element._valueTracker) {
-                            element._valueTracker.setValue('');
+                            element._valueTracker.setValue(text);
                         }
-                        
-                        // Trigger focus events
-                        element.focus();
-                        var focusEvent = new Event('focus', { bubbles: true });
-                        element.dispatchEvent(focusEvent);
-                        
                     """, element, text)
-                    
-                    time.sleep(0.3)  # Give X.com time to process
-                    
+                
+                # Final verification
+                time.sleep(0.5)
+                current_content = element.get_attribute("textContent") or element.get_attribute("value") or element.get_attribute("innerText") or ""
+                safe_print(f"[TEXT] Text verification - Expected: '{text}', Found: '{current_content.strip()}'")
+                
+                # Check if text was successfully entered (allow partial match for contenteditable)
+                text_entered = text.strip() in current_content.strip() or current_content.strip() == text.strip()
+                
+                if not text_entered and i < retries - 1:
+                    safe_print(f"[ERROR] Text verification failed on attempt {i+1}, retrying...")
+                    time.sleep(1)
+                    continue
+                elif not text_entered:
+                    safe_print(f"[WARNING] Text verification failed on final attempt, but continuing...")
                 else:
-                    # Strategy 2: Traditional method for regular inputs
-                    print(f"Using traditional strategy for input element...")
-                    element.clear()
-                    element.send_keys(text)
+                    safe_print(f"[SUCCESS] Text successfully entered and verified")
                 
-                # Verify the text was entered
-                current_content = element.get_attribute("textContent") or element.get_attribute("value") or ""
-                print(f"Text verification - Expected: '{text}', Found: '{current_content}'")
-                
-                if text not in current_content:
-                    print(f"[WARNING] Text verification failed on attempt {i+1}")
-                    if i < retries - 1:
-                        continue
+                # Wait a moment for page to process the input
+                time.sleep(0.3)
                 
                 if press_enter:
                     element.send_keys(Keys.ENTER)
@@ -347,50 +498,104 @@ class BrowserController:
             timeout: Maximum time to wait
         """
         if button_keywords is None:
-            button_keywords = ["submit", "send", "post", "publish", "search", "login", "sign in", "continue"]
+            button_keywords = ["submit", "send", "post", "publish", "search", "login", "sign in", "continue", "tweet", "publicar"]
         
-        # Generic button selectors
-        button_selectors = [
-            'button[type="submit"]',
-            'input[type="submit"]',
-            'button:not([disabled])',
-            '[role="button"]:not([aria-disabled="true"])'
-        ]
+        safe_print(f"[SEARCH] Waiting for button to become enabled (keywords: {button_keywords})...")
         
-        for selector in button_selectors:
+        start_time = time.time()
+        while time.time() - start_time < timeout:
             try:
-                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                # Try to find buttons with the keywords
+                for keyword in button_keywords:
+                    # Check for buttons with text containing the keyword
+                    buttons = self.driver.execute_script(f"""
+                        var buttons = Array.from(document.querySelectorAll('button, input[type="submit"], [role="button"]'));
+                        return buttons.filter(btn => {{
+                            var text = (btn.textContent || btn.value || btn.getAttribute('aria-label') || '').toLowerCase();
+                            var isEnabled = !btn.disabled && btn.offsetParent !== null && 
+                                           getComputedStyle(btn).display !== 'none' &&
+                                           getComputedStyle(btn).visibility !== 'hidden';
+                            return text.includes('{keyword.lower()}') && isEnabled;
+                        }}).map(btn => ({{
+                            text: btn.textContent || btn.value || btn.getAttribute('aria-label') || '',
+                            enabled: !btn.disabled,
+                            visible: btn.offsetParent !== null,
+                            selector: btn.id ? '#' + btn.id : btn.className ? '.' + btn.className.split(' ')[0] : btn.tagName.toLowerCase()
+                        }}));
+                    """)
+                    
+                    if buttons and len(buttons) > 0:
+                        enabled_buttons = [btn for btn in buttons if btn['enabled'] and btn['visible']]
+                        if enabled_buttons:
+                            safe_print(f"[SUCCESS] Found {len(enabled_buttons)} enabled button(s) with keyword '{keyword}':")
+                            for btn in enabled_buttons[:2]:  # Show first 2
+                                print(f"   - '{btn['text'].strip()}' ({btn['selector']})")
+                            return True
                 
-                for button in buttons:
-                    try:
-                        button_text = (button.text or "").lower()
-                        aria_label = (button.get_attribute("aria-label") or "").lower()
-                        
-                        # Check if button matches our keywords
-                        text_matches = any(keyword.lower() in button_text for keyword in button_keywords)
-                        label_matches = any(keyword.lower() in aria_label for keyword in button_keywords)
-                        
-                        if text_matches or label_matches:
-                            is_enabled = button.is_enabled() and not button.get_attribute("disabled")
-                            aria_disabled = button.get_attribute("aria-disabled")
-                            
-                            if is_enabled and aria_disabled != "true":
-                                print(f"[OK] Found enabled button: '{button_text or aria_label}'")
-                                return True
-                                
-                    except Exception:
-                        continue
-                        
+                time.sleep(0.5)  # Check every 500ms
+                
             except Exception as e:
-                print(f"Could not check buttons with selector {selector}: {e}")
-                continue
+                print(f"Error checking button state: {e}")
+                time.sleep(0.5)
         
-        print(f"[WARNING] No enabled button found with keywords: {button_keywords}")
+        safe_print(f"[WARNING] No enabled buttons found with keywords {button_keywords} within {timeout}s")
         return False
+    
+    def verify_text_input_detected(self, selector: str, expected_text: str, timeout: int = 5) -> bool:
+        """
+        Verify that text input was detected by checking if related buttons become enabled.
+        This is particularly useful for modern SPAs that enable/disable buttons based on input validation.
+        """
+        safe_print(f"[SEARCH] Verifying text input was detected by the page...")
+        
+        try:
+            element = self.driver.find_element(By.CSS_SELECTOR, selector)
+            
+            # Check the actual content
+            current_content = element.get_attribute("textContent") or element.get_attribute("value") or element.get_attribute("innerText") or ""
+            content_match = expected_text.strip() in current_content.strip()
+            
+            safe_print(f"[TEXT] Content check: Expected '{expected_text}', Found '{current_content.strip()}' - {'[SUCCESS] Match' if content_match else '[ERROR] No match'}")
+            
+            # Check if submit/post buttons are now enabled (common pattern in modern apps)
+            buttons_enabled = self.wait_for_button_enabled(timeout=timeout)
+            
+            # JavaScript check for additional validation
+            js_validation = self.driver.execute_script("""
+                var element = arguments[0];
+                var text = arguments[1];
+                
+                // Check various properties that frameworks might use
+                var checks = {
+                    textContent: element.textContent && element.textContent.includes(text),
+                    value: element.value && element.value.includes(text),
+                    innerText: element.innerText && element.innerText.includes(text),
+                    hasText: element.textContent.length > 0 || element.value.length > 0,
+                    isFocused: document.activeElement === element || element.matches(':focus')
+                };
+                
+                return checks;
+            """, element, expected_text)
+            
+            safe_print(f"[SEARCH] JS validation: {js_validation}")
+            
+            # Consider successful if content matches OR buttons are enabled (indicating page detected input)
+            success = content_match or buttons_enabled
+            
+            if success:
+                safe_print(f"[SUCCESS] Text input verification successful!")
+            else:
+                safe_print(f"[WARNING] Text input verification inconclusive - page may not have detected the input")
+            
+            return success
+            
+        except Exception as e:
+            safe_print(f"[ERROR] Error verifying text input: {e}")
+            return False
 
     def click_button_from_json(self, page_info: dict, button_keywords: list = None) -> bool:
         """
-        Click a button using selectors from the JSON data.
+        Click a button using selectors from the JSON data with enhanced search.
         This uses the actual elements found in the page analysis.
         
         Args:
@@ -398,40 +603,100 @@ class BrowserController:
             button_keywords: Keywords to search for in button text/labels
         """
         if button_keywords is None:
-            button_keywords = ["submit", "send", "post", "publish", "search", "login", "sign in", "continue", "next"]
+            button_keywords = ["submit", "send", "post", "publish", "search", "login", "sign in", "continue", "next", "tweet", "publicar"]
         
         interactive_elements = page_info.get("interactive_elements", {})
         
-        # Look for buttons matching keywords in the JSON data
-        for element_id, element_data in interactive_elements.items():
-            element_text = (element_data.get("text", "") or "").lower()
-            element_aria = (element_data.get("aria_label", "") or "").lower()
-            element_type = element_data.get("type", "")
-            selector = element_data.get("selector", "")
-            
-            # Check if this looks like a relevant button
-            is_target_button = (
-                element_type == "button" and
-                (any(keyword.lower() in element_text for keyword in button_keywords) or
-                 any(keyword.lower() in element_aria for keyword in button_keywords))
-            )
-            
-            if is_target_button and selector:
-                print(f"Found target button in JSON: '{element_text or element_aria}' with selector: {selector}")
-                
-                try:
-                    success = self.safe_click(By.CSS_SELECTOR, selector, timeout=5)
-                    if success:
-                        print(f"[OK] Successfully clicked button: {selector}")
-                        return True
-                    else:
-                        print(f"[WARNING] Failed to click button: {selector}")
-                        
-                except Exception as e:
-                    print(f"Error clicking button {selector}: {e}")
-                    continue
+        safe_print(f"[SEARCH] [PROGRAMMATIC] Searching for buttons with keywords: {button_keywords}")
+        safe_print(f"[DATA] [PROGRAMMATIC] Available elements to search: {len(interactive_elements.get('elements', []))}")
         
-        print(f"[ERROR] No button found in JSON data with keywords: {button_keywords}")
+        # First, try to find exact keyword matches
+        found_buttons = []
+        
+        # Look for buttons in the elements list (new format)
+        elements_list = interactive_elements.get("elements", [])
+        if elements_list:
+            for element_data in elements_list:
+                element_text = (element_data.get("text", "") or "").lower()
+                element_aria = (element_data.get("aria-label", "") or "").lower()
+                element_title = (element_data.get("title", "") or "").lower()
+                element_tag = element_data.get("tag", "").lower()
+                selector = element_data.get("selector", "")
+                
+                # Check if this is a button-like element
+                is_button_like = element_tag in ["button", "input"] or "button" in element_data.get("role", "").lower()
+                
+                # Check for keyword matches
+                text_match = any(keyword.lower() in element_text for keyword in button_keywords)
+                aria_match = any(keyword.lower() in element_aria for keyword in button_keywords)
+                title_match = any(keyword.lower() in element_title for keyword in button_keywords)
+                
+                if (is_button_like or text_match or aria_match or title_match) and selector:
+                    score = 0
+                    # Score based on match quality
+                    if text_match: score += 3
+                    if aria_match: score += 2
+                    if title_match: score += 1
+                    if is_button_like: score += 1
+                    
+                    found_buttons.append({
+                        "selector": selector,
+                        "text": element_text,
+                        "aria": element_aria,
+                        "title": element_title,
+                        "tag": element_tag,
+                        "score": score
+                    })
+        
+        # Also check old format for backward compatibility
+        if not found_buttons and hasattr(interactive_elements, 'items'):
+            for element_id, element_data in interactive_elements.items():
+                if element_id == "elements":  # Skip the elements list
+                    continue
+                    
+                element_text = (element_data.get("text", "") or "").lower()
+                element_aria = (element_data.get("aria_label", "") or "").lower()
+                element_type = element_data.get("type", "")
+                selector = element_data.get("selector", "")
+                
+                # Check if this looks like a relevant button
+                is_target_button = (
+                    element_type == "button" and
+                    (any(keyword.lower() in element_text for keyword in button_keywords) or
+                     any(keyword.lower() in element_aria for keyword in button_keywords))
+                )
+                
+                if is_target_button and selector:
+                    found_buttons.append({
+                        "selector": selector,
+                        "text": element_text,
+                        "aria": element_aria,
+                        "score": 2
+                    })
+        
+        # Sort by score (best matches first)
+        found_buttons.sort(key=lambda x: x["score"], reverse=True)
+        
+        safe_print(f"[TARGET] [PROGRAMMATIC] Found {len(found_buttons)} potential button matches")
+        
+        # Try to click the best matches
+        for button in found_buttons:
+            button_description = button.get("text") or button.get("aria") or button.get("title") or "no text"
+            safe_print(f"[CLICK] [PROGRAMMATIC] Trying to click: '{button_description}' (selector: {button['selector']}, score: {button['score']})")
+            
+            try:
+                success = self.safe_click(By.CSS_SELECTOR, button["selector"], timeout=5)
+                if success:
+                    safe_print(f"[SUCCESS] [PROGRAMMATIC] Successfully clicked button: {button['selector']}")
+                    return True
+                else:
+                    safe_print(f"[WARNING] [PROGRAMMATIC] Failed to click button: {button['selector']}")
+                    
+            except Exception as e:
+                safe_print(f"[ERROR] [PROGRAMMATIC] Error clicking button {button['selector']}: {e}")
+                continue
+        
+        safe_print(f"[ERROR] [PROGRAMMATIC] No clickable button found with keywords: {button_keywords}")
         return False
 
     def navigate_to(self, url: str):

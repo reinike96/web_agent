@@ -38,7 +38,7 @@ class FileGenerator:
     
     def install_dependencies(self):
         """
-        Instala las dependencias necesarias si no están disponibles
+        Instala las dependencias necesarias si no est?n disponibles
         """
         global EXCEL_AVAILABLE, WORD_AVAILABLE
         
@@ -65,7 +65,7 @@ class FileGenerator:
     
     def choose_output_file(self, default_name: str = "resultado", file_type: str = "excel") -> Optional[str]:
         """
-        Muestra diálogo para que el usuario elija el destino del archivo
+        Muestra di?logo para que el usuario elija el destino del archivo
         """
         try:
             # Create hidden root window
@@ -349,7 +349,7 @@ class FileGenerator:
     
     def open_file_location(self, file_path: str):
         """
-        Abre la ubicación del archivo generado
+        Abre la ubicaci?n del archivo generado
         """
         try:
             import subprocess

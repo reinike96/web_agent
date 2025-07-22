@@ -1,27 +1,64 @@
 """
 Enhanced Action Controller with intelligent feedback and error recovery
-Controlador de acciones mejorado con retroalimentación inteligente y recuperación de errores
+Controlador de acciones mejorado con retroalimentaci?n inteligente y recuperaci?n de errores
 """
 
 import json
 import time
 import logging
+import re
 from typing import Dict, List, Tuple, Optional
 from safe_print_utils import safe_print_global
+
+def safe_print(text: str):
+    """Safe print that handles Unicode characters that might cause encoding issues on Windows"""
+    try:
+        # Clean emojis and Unicode characters that cause encoding issues
+        cleaned_text = str(text)
+        
+        # Replace common problematic emojis and Unicode characters
+        emoji_replacements = {
+            '[AI]': '[AI]',
+            '[SUCCESS]': '[SUCCESS]',
+            '[ERROR]': '[ERROR]',
+            '[WARNING]': '[WARNING]',
+            '[PROCESSING]': '[RELOAD]',
+            '[DOCUMENT]': '[CODE]',
+            '[LIST]': '[LIST]'
+        }
+        
+        # Replace known emojis
+        for emoji, replacement in emoji_replacements.items():
+            cleaned_text = cleaned_text.replace(emoji, replacement)
+        
+        # Remove any remaining problematic Unicode characters
+        cleaned_text = re.sub(r'[\U00010000-\U0010ffff]', '[EMOJI]', cleaned_text)
+        
+        # Final cleanup
+        cleaned_text = cleaned_text.encode('utf-8', errors='replace').decode('utf-8')
+        
+        print(cleaned_text)
+        
+    except Exception as e:
+        try:
+            print(f"[Message with encoding issues - {str(e)}]")
+        except:
+            print("[Message with severe encoding issues - unable to display]")
 
 class EnhancedActionController:
     """
     Sistema mejorado de control de acciones con:
-    1. Retroalimentación inteligente de scripts JS
-    2. Análisis de estado de página
+    1. Retroalimentaci?n inteligente de scripts JS
+    2. An?lisis de estado de p?gina
     3. Reintentos con estrategias diferentes
-    4. Detección de éxito contextual
+    4. Detecci?n de ?xito contextual
     """
     
-    def __init__(self, browser_controller, llm_controller):
+    def __init__(self, browser_controller, memory, logger, llm_controller=None):
         self.browser = browser_controller
+        self.memory = memory
         self.llm = llm_controller
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
         
         # Historial de acciones para evitar loops
         self.action_history = []
@@ -30,17 +67,17 @@ class EnhancedActionController:
         
     def execute_action_with_feedback(self, action: dict, page_info: dict) -> dict:
         """
-        Ejecuta una acción con retroalimentación completa del resultado
+        Ejecuta una acci?n con retroalimentaci?n completa del resultado
         """
         action_type = action.get("action", "")
         action_id = f"{action_type}_{int(time.time())}"
         
         self.logger.info(f"[{action_id}] Executing action: {action}")
         
-        # 1. Analizar estado actual de la página
+        # 1. Analizar estado actual de la p?gina
         current_state = self._analyze_page_state(page_info)
         
-        # 2. Verificar si la acción es realmente necesaria
+        # 2. Verificar si la acci?n es realmente necesaria
         if self._is_action_redundant(action, current_state):
             return {
                 "success": True,
@@ -49,13 +86,13 @@ class EnhancedActionController:
                 "skip_reason": "redundant"
             }
         
-        # 3. Ejecutar la acción con script JS mejorado
+        # 3. Ejecutar la acci?n con script JS mejorado
         result = self._execute_with_enhanced_js(action, page_info)
         
-        # 4. Analizar el resultado y proporcionar retroalimentación
+        # 4. Analizar el resultado y proporcionar retroalimentaci?n
         feedback = self._analyze_action_result(result, action, page_info)
         
-        # 5. Si falló, intentar estrategias alternativas
+        # 5. Si fall?, intentar estrategias alternativas
         if not feedback.get("success", False):
             feedback = self._try_alternative_strategies(action, page_info, result)
         
@@ -66,7 +103,7 @@ class EnhancedActionController:
     
     def _analyze_page_state(self, page_info: dict) -> dict:
         """
-        Analiza el estado actual de la página para detectar contexto
+        Analiza el estado actual de la p?gina para detectar contexto
         """
         interactive_elements = page_info.get("interactive_elements", {})
         url = interactive_elements.get("url", "")
@@ -90,7 +127,7 @@ class EnhancedActionController:
             tag = element.get("tag", "").lower()
             element_type = element.get("type", "").lower()
             
-            # Cajas de búsqueda
+            # Cajas de b?squeda
             if element_type in ["search", "text"] or "search" in text:
                 state["has_search_box"] = True
                 state["key_elements"].append({
@@ -99,7 +136,7 @@ class EnhancedActionController:
                     "text": text
                 })
             
-            # Resultados de búsqueda
+            # Resultados de b?squeda
             if "result" in text or tag in ["article", "li"] and len(text) > 50:
                 state["has_results"] = True
                 state["key_elements"].append({
@@ -112,7 +149,7 @@ class EnhancedActionController:
             if element_type in ["email", "password"] or "login" in text:
                 state["has_login_form"] = True
         
-        # Determinar tipo de página
+        # Determinar tipo de p?gina
         if "amazon" in url and "s?" in url:
             state["current_page_type"] = "amazon_search_results"
         elif "wikipedia" in url:
@@ -126,13 +163,13 @@ class EnhancedActionController:
     
     def _is_action_redundant(self, action: dict, current_state: dict) -> bool:
         """
-        Verifica si una acción es redundante dado el estado actual
+        Verifica si una acci?n es redundante dado el estado actual
         """
         action_type = action.get("action", "")
         
         # Si estamos tratando de buscar pero ya estamos en resultados
         if action_type in ["click_element", "enter_text"] and current_state.get("current_page_type") == "results_page":
-            # Verificar si la acción es para buscar
+            # Verificar si la acci?n es para buscar
             params = action.get("parameters", {})
             selector = params.get("selector", "")
             text = params.get("text", "").lower()
@@ -145,7 +182,7 @@ class EnhancedActionController:
     
     def _execute_with_enhanced_js(self, action: dict, page_info: dict) -> dict:
         """
-        Ejecuta la acción usando scripts JS mejorados con retroalimentación detallada
+        Ejecuta la acci?n usando scripts JS mejorados con retroalimentaci?n detallada
         """
         action_type = action.get("action", "")
         parameters = action.get("parameters", {})
@@ -159,12 +196,12 @@ class EnhancedActionController:
         elif action_type == "click_button":
             return self._enhanced_click_button(parameters.get("keywords", []), page_info)
         else:
-            # Fallback al método original del browser_controller
+            # Fallback al m?todo original del browser_controller
             return {"success": False, "message": f"Action type {action_type} not implemented in enhanced controller"}
     
     def _enhanced_click_element(self, selector: str, page_info: dict) -> dict:
         """
-        Click mejorado con retroalimentación detallada
+        Click mejorado con retroalimentaci?n detallada
         """
         js_script = f"""
         (function() {{
@@ -181,7 +218,7 @@ class EnhancedActionController:
                         '{selector}',
                         '{selector.replace("'", "")}',
                         '{selector.lower()}',
-                        // Más selectores alternativos basados en el selector original
+                        // M?s selectores alternativos basados en el selector original
                     ];
                     
                     for (let altSelector of alternativeSelectors) {{
@@ -246,7 +283,7 @@ class EnhancedActionController:
                     }}
                 }}
                 
-                // Paso 4: Verificar el resultado después de un tiempo (sin await)
+                // Paso 4: Verificar el resultado despu?s de un tiempo (sin await)
                 setTimeout(function() {{
                     console.log('[ENHANCED_CLICK] Post-click verification completed');
                 }}, 1500);
@@ -299,183 +336,64 @@ class EnhancedActionController:
     
     def _enhanced_enter_text(self, selector: str, text: str, page_info: dict, press_enter: bool = True) -> dict:
         """
-        Entrada de texto mejorada con retroalimentación detallada
+        Enhanced text entry with improved typing simulation and verification
         """
-        enter_key = "element.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));" if press_enter else ""
-        
-        js_script = f"""
-        (function() {{
-            console.log('[ENHANCED_TEXT] Starting text entry for selector: {selector}');
-            console.log('[ENHANCED_TEXT] Text to enter: {text}');
-            console.log('[ENHANCED_TEXT] Press enter: {press_enter}');
-            
-            try {{
-                let element = document.querySelector('{selector}');
-                console.log('[ENHANCED_TEXT] Element found:', !!element);
-                
-                if (!element) {{
-                    // Buscar elementos de entrada alternativos
-                    const alternativeSelectors = [
-                        'input[type="text"]',
-                        'input[type="search"]', 
-                        'textarea',
-                        '[contenteditable="true"]',
-                        'input:not([type="hidden"])',
-                        '[role="textbox"]'
-                    ];
-                    
-                    for (let altSelector of alternativeSelectors) {{
-                        const elements = document.querySelectorAll(altSelector);
-                        if (elements.length > 0) {{
-                            element = elements[0]; // Tomar el primero
-                            console.log('[ENHANCED_TEXT] Found alternative element:', altSelector);
-                            break;
-                        }}
-                    }}
-                }}
-                
-                if (!element) {{
-                    return {{
-                        success: false,
-                        error: 'input_element_not_found',
-                        message: 'No input element found with selector: {selector}',
-                        available_inputs: Array.from(document.querySelectorAll('input, textarea, [contenteditable]')).slice(0, 5).map(el => ({{
-                            tag: el.tagName,
-                            type: el.type || 'none',
-                            placeholder: el.placeholder || '',
-                            selector: el.id ? '#' + el.id : (el.className ? '.' + el.className.split(' ')[0] : el.tagName.toLowerCase())
-                        }}))
-                    }};
-                }}
-                
-                // Verificar si el elemento puede recibir texto
-                const isInput = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
-                const isContentEditable = element.contentEditable === 'true';
-                
-                console.log('[ENHANCED_TEXT] Element type check:', {{ isInput, isContentEditable }});
-                
-                if (!isInput && !isContentEditable) {{
-                    return {{
-                        success: false,
-                        error: 'element_not_editable',
-                        message: 'Element is not editable',
-                        element_info: {{
-                            tag: element.tagName,
-                            contentEditable: element.contentEditable,
-                            type: element.type
-                        }}
-                    }};
-                }}
-                
-                // Enfocar el elemento
-                element.focus();
-                setTimeout(function() {{
-                    console.log('[ENHANCED_TEXT] Element focused');
-                }}, 500);
-                
-                // Limpiar contenido existente
-                if (isInput) {{
-                    element.value = '';
-                }} else if (isContentEditable) {{
-                    element.textContent = '';
-                }}
-                
-                // Introducir el texto
-                let textEntered = false;
-                const textMethods = [
-                    function() {{
-                        if (isInput) {{
-                            element.value = '{text}';
-                            element.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        }} else {{
-                            element.textContent = '{text}';
-                            element.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        }}
-                    }},
-                    function() {{
-                        // Método alternativo: simular tipeo
-                        element.dispatchEvent(new Event('focus'));
-                        if (isInput) {{
-                            element.value = '{text}';
-                        }} else {{
-                            element.innerHTML = '{text}';
-                        }}
-                        element.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                ];
-                
-                for (let method of textMethods) {{
-                    try {{
-                        method();
-                        textEntered = true;
-                        console.log('[ENHANCED_TEXT] Text entered successfully');
-                        break;
-                    }} catch (e) {{
-                        console.log('[ENHANCED_TEXT] Text method failed:', e.message);
-                    }}
-                }}
-                
-                // Presionar Enter si es necesario (sin async/await)
-                if ({str(press_enter).lower()} && textEntered) {{
-                    setTimeout(function() {{
-                        try {{
-                            {enter_key}
-                            console.log('[ENHANCED_TEXT] Enter key pressed');
-                        }} catch (e) {{
-                            console.log('[ENHANCED_TEXT] Enter key failed:', e.message);
-                        }}
-                    }}, 500);
-                }}
-                
-                // Verificar que el texto se haya introducido (sin async/await)
-                setTimeout(function() {{
-                    const currentValue = isInput ? element.value : element.textContent;
-                    const textWasEntered = currentValue.includes('{text}');
-                    console.log('[ENHANCED_TEXT] Verification - text was entered:', textWasEntered);
-                }}, 1000);
-                
-                const currentValue = isInput ? element.value : element.textContent;
-                const textWasEntered = currentValue.includes('{text}') || textEntered;
-                
-                return {{
-                    success: textEntered && textWasEntered,
-                    message: textEntered ? 'Text entered successfully' : 'Failed to enter text',
-                    details: {{
-                        element_found: true,
-                        element_type: element.tagName,
-                        is_editable: isInput || isContentEditable,
-                        text_requested: '{text}',
-                        text_entered: currentValue,
-                        text_matches: textWasEntered,
-                        enter_pressed: {str(press_enter).lower()}
-                    }}
-                }};
-                
-            }} catch (error) {{
-                console.error('[ENHANCED_TEXT] Unexpected error:', error);
-                return {{
-                    success: false,
-                    error: 'unexpected_error',
-                    message: 'Unexpected error during text entry: ' + error.message
-                }};
-            }}
-        }})();
-        """
+        print(f"[ENHANCED_TEXT] Starting enhanced text entry for selector: {selector}")
+        print(f"[ENHANCED_TEXT] Text to enter: '{text}'")
+        print(f"[ENHANCED_TEXT] Press enter: {press_enter}")
         
         try:
-            result = self.browser.driver.execute_script(js_script)
-            self.logger.info(f"Text entry result: {result}")
-            return result if isinstance(result, dict) else {"success": False, "message": "Invalid response from JS"}
+            # Use the improved browser controller method
+            success = self.browser.enter_text_without_enter(selector, text) if not press_enter else self.browser.enter_text(selector, text, press_enter=True)
+            
+            if success:
+                print("[ENHANCED_TEXT] Text entry completed, verifying input detection...")
+                
+                # Use enhanced verification
+                input_detected = self.browser.verify_text_input_detected(selector, text, timeout=5)
+                
+                # Provide detailed feedback
+                feedback = {
+                    "success": True,
+                    "action_type": "enter_text",
+                    "selector_used": selector,
+                    "text_entered": text,
+                    "input_detected": input_detected,
+                    "message": f"Successfully entered text '{text}' using enhanced typing simulation",
+                    "verification": "[SUCCESS] Input verified by page" if input_detected else "[WARNING] Input verification inconclusive"
+                }
+                
+                if input_detected:
+                    safe_print("[SUCCESS] Enhanced text entry successful - page detected the input")
+                else:
+                    safe_print("[WARNING] Text entered but page detection uncertain - continuing")
+                    
+            else:
+                feedback = {
+                    "success": False,
+                    "action_type": "enter_text",
+                    "selector_used": selector,
+                    "error": "Failed to enter text using enhanced method",
+                    "message": f"Could not enter text '{text}' in element with selector '{selector}'"
+                }
+                safe_print("[ERROR] Enhanced text entry failed")
+            
+            return feedback
+            
         except Exception as e:
-            return {
+            error_feedback = {
                 "success": False,
-                "error": "script_execution_failed", 
-                "message": f"Failed to execute text entry script: {str(e)}"
+                "action_type": "enter_text", 
+                "selector_used": selector,
+                "error": str(e),
+                "message": f"Exception during enhanced text entry: {str(e)}"
             }
+            safe_print(f"[ERROR] Exception during enhanced text entry: {e}")
+            return error_feedback
     
     def _enhanced_click_button(self, keywords: List[str], page_info: dict) -> dict:
         """
-        Click de botón mejorado buscando por palabras clave
+        Click de bot?n mejorado buscando por palabras clave
         """
         keywords_js = json.dumps(keywords) if keywords else '[]'
         
@@ -491,7 +409,7 @@ class EnhancedActionController:
             let targetButton = null;
             let matchReason = '';
             
-            // Buscar botón que coincida con las palabras clave
+            // Buscar bot?n que coincida con las palabras clave
             for (let button of buttons) {{
                 const buttonText = button.textContent.toLowerCase().trim();
                 const buttonValue = (button.value || '').toLowerCase();
@@ -527,7 +445,7 @@ class EnhancedActionController:
             }}
             
             if (!targetButton && buttons.length > 0) {{
-                // Fallback: tomar el primer botón visible
+                // Fallback: tomar el primer bot?n visible
                 targetButton = buttons.find(btn => {{
                     const rect = btn.getBoundingClientRect();
                     return rect.width > 0 && rect.height > 0;
@@ -608,7 +526,7 @@ class EnhancedActionController:
     
     def _analyze_action_result(self, result: dict, action: dict, page_info: dict) -> dict:
         """
-        Analiza el resultado de una acción y proporciona retroalimentación detallada
+        Analiza el resultado de una acci?n y proporciona retroalimentaci?n detallada
         """
         if result.get("success", False):
             return {
@@ -619,7 +537,7 @@ class EnhancedActionController:
                 "feedback": "Action executed without errors and achieved expected outcome"
             }
         
-        # Analizar el tipo de error para proporcionar retroalimentación específica
+        # Analizar el tipo de error para proporcionar retroalimentaci?n espec?fica
         error_type = result.get("error", "unknown")
         
         feedback = {
@@ -670,7 +588,7 @@ class EnhancedActionController:
     
     def _try_alternative_strategies(self, original_action: dict, page_info: dict, previous_result: dict) -> dict:
         """
-        Intenta estrategias alternativas cuando una acción falla
+        Intenta estrategias alternativas cuando una acci?n falla
         """
         action_type = original_action.get("action", "")
         
@@ -689,7 +607,7 @@ class EnhancedActionController:
         """
         Estrategias alternativas para click
         """
-        # Estrategia 1: Intentar con selectores genéricos
+        # Estrategia 1: Intentar con selectores gen?ricos
         generic_selectors = [
             "button:first-of-type",
             "input[type='submit']",
@@ -707,7 +625,7 @@ class EnhancedActionController:
                 result["strategy"] = f"generic_selector: {selector}"
                 return result
         
-        # Estrategia 2: Click por coordenadas (si tenemos información del elemento)
+        # Estrategia 2: Click por coordenadas (si tenemos informaci?n del elemento)
         available_elements = previous_result.get("available_elements", [])
         if available_elements:
             first_element = available_elements[0]
@@ -726,7 +644,7 @@ class EnhancedActionController:
         text = action.get("parameters", {}).get("text", "")
         press_enter = action.get("action") == "enter_text"
         
-        # Estrategia 1: Probar selectores genéricos de entrada
+        # Estrategia 1: Probar selectores gen?ricos de entrada
         generic_selectors = [
             "input:first-of-type",
             "textarea:first-of-type", 
@@ -755,9 +673,9 @@ class EnhancedActionController:
     
     def _alternative_button_strategies(self, action: dict, page_info: dict, previous_result: dict) -> dict:
         """
-        Estrategias alternativas para click de botón
+        Estrategias alternativas para click de bot?n
         """
-        # Estrategia 1: Probar con keywords más genéricas
+        # Estrategia 1: Probar con keywords m?s gen?ricas
         generic_keywords = ["search", "submit", "go", "enter", "send"]
         
         result = self._enhanced_click_button(generic_keywords, page_info)
@@ -765,11 +683,11 @@ class EnhancedActionController:
             result["strategy"] = "generic_keywords"
             return result
         
-        # Estrategia 2: Click en cualquier botón disponible
+        # Estrategia 2: Click en cualquier bot?n disponible
         available_buttons = previous_result.get("available_buttons", [])
         if available_buttons:
-            # Intentar hacer click en el primer botón disponible
-            result = self._enhanced_click_button([], page_info)  # Sin keywords específicas
+            # Intentar hacer click en el primer bot?n disponible
+            result = self._enhanced_click_button([], page_info)  # Sin keywords espec?ficas
             if result.get("success", False):
                 result["strategy"] = "any_available_button"
                 return result
@@ -789,7 +707,7 @@ class EnhancedActionController:
             "signature": action_signature
         })
         
-        # Mantener solo las últimas 20 acciones
+        # Mantener solo las ?ltimas 20 acciones
         if len(self.action_history) > 20:
             self.action_history = self.action_history[-20:]
         
@@ -800,7 +718,7 @@ class EnhancedActionController:
     
     def get_action_feedback_for_llm(self, action: dict, result: dict) -> str:
         """
-        Genera retroalimentación formateada para enviar al LLM
+        Genera retroalimentaci?n formateada para enviar al LLM
         """
         if result.get("success", False):
             details = result.get("details", {})
@@ -843,7 +761,7 @@ Error Analysis:
 Available Alternatives:
 """
             
-            # Agregar información sobre elementos/inputs/botones disponibles
+            # Agregar informaci?n sobre elementos/inputs/botones disponibles
             for key in ['available_elements', 'available_inputs', 'available_buttons']:
                 if key in result and result[key]:
                     feedback += f"\n{key.replace('_', ' ').title()}:\n"
@@ -859,17 +777,17 @@ Available Alternatives:
     
     def should_skip_action_based_on_context(self, action: dict, current_state: dict) -> Tuple[bool, str]:
         """
-        Determina si una acción debe omitirse basándose en el contexto actual
+        Determina si una acci?n debe omitirse bas?ndose en el contexto actual
         """
         action_type = action.get("action", "")
         parameters = action.get("parameters", {})
         
-        # Omitir búsquedas si ya estamos en resultados relevantes
+        # Omitir b?squedas si ya estamos en resultados relevantes
         if action_type in ["enter_text", "click_element"] and current_state.get("current_page_type") == "results_page":
             if "search" in parameters.get("selector", "").lower() or "search" in parameters.get("text", "").lower():
                 return True, "Already in search results page, no need to search again"
         
-        # Omitir navegación si ya estamos en la página correcta
+        # Omitir navegaci?n si ya estamos en la p?gina correcta
         if action_type == "navigate_to":
             target_url = parameters.get("url", "")
             current_url = current_state.get("url", "")
@@ -877,3 +795,441 @@ Available Alternatives:
                 return True, f"Already at target page: {current_url}"
         
         return False, ""
+
+    def _llm_fallback_action(self, action: dict, page_info: dict, previous_result: dict) -> dict:
+        """
+        Fallback usando LLM: env?a el JSON completo de la p?gina para que el LLM genere c?digo JS espec?fico
+        """
+        action_type = action.get("action", "")
+        parameters = action.get("parameters", {})
+        
+        safe_print(f"[AI] [LLM_FALLBACK] Iniciando fallback con LLM para acci?n: {action_type}")
+        
+        # Preparar el contexto completo para el LLM
+        llm_context = {
+            "action_requested": action,
+            "page_elements": page_info.get("interactive_elements", {}).get("elements", []),
+            "page_url": page_info.get("url", ""),
+            "page_title": page_info.get("title", ""),
+            "previous_failure": previous_result,
+            "objective": f"Generate JavaScript code to {action_type} with parameters {parameters}"
+        }
+        
+        # Crear prompt para el LLM
+        llm_prompt = f"""
+TASK: Generate JavaScript code to perform the following action on a web page.
+
+ACTION REQUESTED: {action_type}
+PARAMETERS: {json.dumps(parameters, indent=2)}
+
+AVAILABLE PAGE ELEMENTS:
+{json.dumps(page_info.get("interactive_elements", {}).get("elements", [])[:20], indent=2)}
+
+PAGE CONTEXT:
+- URL: {page_info.get("url", "")}
+- Title: {page_info.get("title", "")}
+
+PREVIOUS FAILURE:
+{json.dumps(previous_result, indent=2)}
+
+CRITICAL REQUIREMENTS:
+1. Return ONLY executable JavaScript code wrapped in (function() {{ ... }})();
+2. The code should be robust and handle edge cases
+3. Use console.log for debugging information
+4. Return a result object with success status: return {{success: true/false, message: "...", details: {{...}}}}
+5. For button clicks: find the most appropriate button based on the action context
+6. For text input: NEVER use simple value assignment (element.value = text)
+7. For text input: ALWAYS simulate real typing with proper events to trigger SPA validation
+8. Handle both contenteditable and regular input elements
+
+ENHANCED TEXT INPUT SIMULATION REQUIREMENTS:
+- Clear the field first with proper selection
+- Simulate realistic typing with individual keystrokes
+- Fire proper events: focus, input, keydown, keyup, change, blur
+- For React/Vue/Angular SPAs: dispatch input events with proper event properties
+- Verify the text was actually entered and detected by the page
+
+ENHANCED TEXT INPUT CODE TEMPLATE:
+function simulateRealTyping(element, text) {{
+    // Focus the element first
+    element.focus();
+    element.click();
+    
+    // Clear existing content
+    element.select();
+    element.setSelectionRange(0, element.value.length);
+    
+    // Simulate backspace to clear
+    element.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Backspace', bubbles: true}}));
+    element.value = '';
+    element.dispatchEvent(new Event('input', {{bubbles: true}}));
+    
+    // Type each character with proper events
+    for (let i = 0; i < text.length; i++) {{
+        const char = text[i];
+        
+        // Simulate keydown
+        element.dispatchEvent(new KeyboardEvent('keydown', {{
+            key: char,
+            keyCode: char.charCodeAt(0),
+            which: char.charCodeAt(0),
+            bubbles: true
+        }}));
+        
+        // Add the character
+        element.value += char;
+        
+        // Simulate input event (crucial for React/Vue)
+        element.dispatchEvent(new Event('input', {{
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: char
+        }}));
+        
+        // Simulate keyup
+        element.dispatchEvent(new KeyboardEvent('keyup', {{
+            key: char,
+            keyCode: char.charCodeAt(0),
+            which: char.charCodeAt(0),
+            bubbles: true
+        }}));
+    }}
+    
+    // Final events to ensure SPA detects the input
+    element.dispatchEvent(new Event('change', {{bubbles: true}}));
+    element.blur();
+}}
+
+EXAMPLE OUTPUT FORMAT:
+(function() {{
+    // ALWAYS INCLUDE THIS ENHANCED TYPING FUNCTION
+    function simulateRealTyping(element, text) {{
+        console.log('[ENHANCED_TYPING] Starting enhanced typing simulation for:', text.substring(0, 50));
+        
+        // Focus the element first
+        element.focus();
+        element.click();
+        
+        // Clear existing content with proper selection
+        if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+            // For contenteditable div (like X.com)
+            element.selectAll && element.selectAll();
+            const selection = window.getSelection();
+            selection.selectAllChildren(element);
+            selection.deleteFromDocument();
+        }} else {{
+            // For regular input/textarea
+            element.select();
+            element.setSelectionRange(0, element.value.length);
+            element.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Backspace', bubbles: true}}));
+            element.value = '';
+        }}
+        
+        // Initial input event to clear
+        element.dispatchEvent(new Event('input', {{bubbles: true}}));
+        
+        // Type each character with realistic timing
+        let currentText = '';
+        for (let i = 0; i < text.length; i++) {{
+            const char = text[i];
+            currentText += char;
+            
+            // Simulate keydown
+            element.dispatchEvent(new KeyboardEvent('keydown', {{
+                key: char,
+                keyCode: char.charCodeAt(0),
+                which: char.charCodeAt(0),
+                bubbles: true,
+                cancelable: true
+            }}));
+            
+            // Update content based on element type
+            if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+                element.textContent = currentText;
+            }} else {{
+                element.value = currentText;
+            }}
+            
+            // Simulate input event (crucial for React/Vue/SPA frameworks)
+            const inputEvent = new Event('input', {{
+                bubbles: true,
+                cancelable: true
+            }});
+            inputEvent.inputType = 'insertText';
+            inputEvent.data = char;
+            element.dispatchEvent(inputEvent);
+            
+            // Simulate keyup
+            element.dispatchEvent(new KeyboardEvent('keyup', {{
+                key: char,
+                keyCode: char.charCodeAt(0),
+                which: char.charCodeAt(0),
+                bubbles: true
+            }}));
+        }}
+        
+        // Final events to ensure SPA frameworks detect the change
+        element.dispatchEvent(new Event('change', {{bubbles: true}}));
+        element.dispatchEvent(new Event('blur', {{bubbles: true}}));
+        
+        console.log('[ENHANCED_TYPING] Enhanced typing simulation completed');
+        return true;
+    }}
+    
+    try {{
+        console.log('[LLM_ACTION] Starting {action_type}...');
+        
+        if ('{action_type}' === 'type_text') {{
+            // Use enhanced typing simulation
+            const text = {json.dumps(parameters.get('text', ''))};
+            
+            // Common selectors for popular sites
+            const inputSelectors = [
+                // X.com (Twitter) composer
+                'div[data-testid="tweetTextarea_0"]',
+                'div[role="textbox"][data-testid="tweetTextarea_0"]',
+                'div[contenteditable="true"][data-testid="tweetTextarea_0"]',
+                // Generic social media
+                'div[role="textbox"][contenteditable="true"]',
+                'div[contenteditable="true"][aria-multiline="true"]',
+                // Regular inputs  
+                'input[type="text"]', 'textarea', 
+                // Fallback
+                '[contenteditable="true"]', 'input', 'textarea'
+            ];
+            
+            let element = null;
+            for (const selector of inputSelectors) {{
+                element = document.querySelector(selector);
+                if (element && element.offsetParent !== null) break; // visible element
+            }}
+            
+            if (element) {{
+                simulateRealTyping(element, text);
+                console.log('[LLM_ACTION] Enhanced typing completed on element:', element.tagName, element.getAttribute('data-testid'));
+                
+                // Additional verification for X.com
+                if (window.location.href.includes('x.com') || window.location.href.includes('twitter.com')) {{
+                    // Wait a bit for React to process
+                    setTimeout(() => {{
+                        const postButton = document.querySelector('[data-testid="tweetButtonInline"]') || 
+                                         document.querySelector('[data-testid="tweetButton"]') ||
+                                         document.querySelector('div[role="button"]:has-text("Post")');
+                        if (postButton && !postButton.disabled) {{
+                            console.log('[LLM_ACTION] Post button is now enabled after typing');
+                        }}
+                    }}, 500);
+                }}
+            }} else {{
+                console.error('[LLM_ACTION] No suitable text input element found');
+            }}
+        }} else if ('{action_type}' === 'click_button') {{
+            // Enhanced button clicking with better detection
+            const keywords = {json.dumps(parameters.get('keywords', []))};
+            const buttonSelectors = [
+                // X.com specific
+                '[data-testid="tweetButtonInline"]',
+                '[data-testid="tweetButton"]', 
+                'div[role="button"]:has-text("Post")',
+                'div[role="button"]:has-text("Tweet")',
+                // Generic patterns
+                'button', 'input[type="submit"]', 'div[role="button"]',
+                'a[role="button"]', '.btn', '.button'
+            ];
+            
+            let targetButton = null;
+            
+            // Try specific selectors first
+            for (const selector of buttonSelectors) {{
+                const button = document.querySelector(selector);
+                if (button && button.offsetParent !== null && !button.disabled) {{
+                    targetButton = button;
+                    break;
+                }}
+            }}
+            
+            // Fallback: search by text content
+            if (!targetButton) {{
+                const allButtons = document.querySelectorAll('button, div[role="button"], input[type="submit"]');
+                for (const button of allButtons) {{
+                    const text = button.textContent.toLowerCase().trim();
+                    if (keywords.some(keyword => text.includes(keyword.toLowerCase()))) {{
+                        targetButton = button;
+                        break;
+                    }}
+                }}
+            }}
+            
+            if (targetButton) {{
+                targetButton.focus();
+                targetButton.click();
+                console.log('[LLM_ACTION] Successfully clicked button:', targetButton.textContent.trim());
+            }}
+        }}
+        
+        // Find and interact with elements using enhanced methods
+        // Add any additional logic here based on the specific action
+        
+        return {{
+            success: true,
+            message: "Action completed successfully with enhanced simulation",
+            details: {{
+                element_found: true,
+                action_performed: true,
+                enhanced_simulation_used: true,
+                action_type: '{action_type}'
+            }}
+        }};
+    }} catch (error) {{
+        console.error('[LLM_ACTION] Error:', error);
+        return {{
+            success: false,
+            message: "Error: " + error.message,
+            details: {{
+                error_type: error.name,
+                stack: error.stack,
+                action_type: '{action_type}'
+            }}
+        }};
+    }}
+}})();
+
+Generate the JavaScript code now:
+"""
+        
+        try:
+            # Solicitar código JavaScript al LLM
+            safe_print("[AI] [LLM_FALLBACK] Solicitando código JavaScript al LLM...")
+            llm_response = self.llm.ask_llm_with_context(
+                llm_prompt, 
+                page_context=llm_context,
+                max_tokens=1500
+            )
+            
+            if not llm_response or not llm_response.strip():
+                return {
+                    "success": False,
+                    "message": "LLM fallback failed - empty response",
+                    "fallback_used": True
+                }
+            
+            # Limpiar la respuesta del LLM para extraer solo el c?digo JavaScript
+            js_code = self._extract_js_code_from_llm_response(llm_response)
+            
+            if not js_code:
+                return {
+                    "success": False,
+                    "message": "LLM fallback failed - no valid JavaScript code generated",
+                    "llm_response": llm_response[:200],
+                    "fallback_used": True
+                }
+            
+            safe_print(f"[AI] [LLM_FALLBACK] Ejecutando c?digo JavaScript generado por LLM...")
+            safe_print(f"[DOCUMENT] [LLM_CODE] {js_code[:200]}...")
+            
+            # Ejecutar el c?digo JavaScript generado por el LLM
+            result = self.browser.driver.execute_script(js_code)
+            
+            if isinstance(result, dict):
+                result["fallback_used"] = True
+                result["llm_generated"] = True
+                
+                if result.get("success", False):
+                    safe_print("[SUCCESS] [LLM_FALLBACK] C?digo LLM ejecutado exitosamente!")
+                else:
+                    safe_print(f"[ERROR] [LLM_FALLBACK] C?digo LLM fall?: {result.get('message', 'Unknown error')}")
+                    
+                return result
+            else:
+                return {
+                    "success": False,
+                    "message": f"LLM fallback returned unexpected result type: {type(result)}",
+                    "result": str(result)[:100],
+                    "fallback_used": True
+                }
+                
+        except Exception as e:
+            safe_print(f"[ERROR] [LLM_FALLBACK] Error en fallback con LLM: {str(e)}")
+            return {
+                "success": False,
+                "message": f"LLM fallback exception: {str(e)}",
+                "fallback_used": True,
+                "error_type": type(e).__name__
+            }
+    
+    def _extract_js_code_from_llm_response(self, llm_response: str) -> str:
+        """
+        Extrae el c?digo JavaScript de la respuesta del LLM
+        """
+        # Buscar patrones comunes de c?digo JavaScript en la respuesta
+        
+        # Patr?n 1: C?digo envuelto en ```javascript
+        js_pattern1 = r'```(?:javascript|js)?\s*(.*?)```'
+        match1 = re.search(js_pattern1, llm_response, re.DOTALL | re.IGNORECASE)
+        if match1:
+            return match1.group(1).strip()
+        
+        # Patr?n 2: Funci?n auto-ejecutable (function() { ... })();
+        js_pattern2 = r'\(function\(\)\s*\{.*?\}\)\(\);'
+        match2 = re.search(js_pattern2, llm_response, re.DOTALL)
+        if match2:
+            return match2.group(0)
+        
+        # Patr?n 3: Cualquier l?nea que comience con (function()
+        lines = llm_response.split('\n')
+        js_lines = []
+        in_js_block = False
+        
+        for line in lines:
+            if line.strip().startswith('(function()') or line.strip().startswith('function()'):
+                in_js_block = True
+                js_lines.append(line)
+            elif in_js_block:
+                js_lines.append(line)
+                if '})();' in line:
+                    break
+        
+        if js_lines:
+            return '\n'.join(js_lines)
+        
+        # Fallback: usar toda la respuesta si contiene palabras clave JavaScript
+        js_keywords = ['function', 'document.', 'console.log', 'return {', 'success:', 'try {']
+        if any(keyword in llm_response for keyword in js_keywords):
+            return llm_response.strip()
+        
+        return ""
+
+    def execute_action_with_llm_fallback(self, action: dict, page_info: dict) -> dict:
+        """
+        Ejecuta una acci?n con fallback autom?tico a LLM cuando falla el m?todo program?tico
+        """
+        action_type = action.get("action", "")
+        
+        # Intentar m?todo program?tico primero
+        print(f"[HYBRID] Intentando m?todo program?tico para: {action_type}")
+        
+        if action_type == "click_button":
+            keywords = action.get("parameters", {}).get("keywords", [])
+            programmatic_result = self._enhanced_click_button(keywords, page_info)
+        elif action_type in ["enter_text", "enter_text_no_enter"]:
+            selector = action.get("parameters", {}).get("selector", "")
+            text = action.get("parameters", {}).get("text", "")
+            press_enter = action_type == "enter_text"
+            programmatic_result = self._enhanced_enter_text(selector, text, page_info, press_enter)
+        else:
+            programmatic_result = {"success": False, "message": f"Unsupported action type: {action_type}"}
+        
+        # Si el m?todo program?tico fue exitoso, retornar ese resultado
+        if programmatic_result.get("success", False):
+            safe_print(f"[SUCCESS] [HYBRID] M?todo program?tico exitoso para: {action_type}")
+            programmatic_result["method_used"] = "programmatic"
+            return programmatic_result
+        
+        # Si fall?, usar fallback con LLM
+        safe_print(f"[AI] [HYBRID] M?todo program?tico fall?, usando fallback con LLM para: {action_type}")
+        llm_result = self._llm_fallback_action(action, page_info, programmatic_result)
+        llm_result["method_used"] = "llm_fallback"
+        llm_result["programmatic_failure"] = programmatic_result
+        
+        return llm_result

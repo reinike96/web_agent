@@ -202,13 +202,22 @@ button_send = None # Will be defined later
 button_close = None # Will be defined later
 button = None # Will be defined later
 
+# Global orchestrator instance for reuse
+global_agent = None
+
 def cancel_task():
-    global button
+    global button, global_agent
     cancel_event.set()
     if loading_gif:
         loading_gif.stop()
     if button:
         button.configure(text="Send", image=button_send, command=start_task_thread)
+    
+    # Optionally close the browser on cancel if user wants to start fresh
+    # if global_agent and global_agent.browser and global_agent.browser.driver:
+    #     global_agent.browser.driver.quit()
+    #     global_agent = None
+    
     set_message("Process canceled!")
 
 def start_task_thread():
@@ -221,7 +230,7 @@ def start_task_thread():
     thread.start()
 
 def run_agent_task():
-    global loading_gif, button
+    global loading_gif, button, global_agent
     if loading_gif:
         loading_gif.start()
     
@@ -242,12 +251,55 @@ def run_agent_task():
         return
 
     try:
-        agent = NewOrchestrator(goal=goal, message_callback=lambda msg: set_message(msg, reset=False))
-        agent.run()
+        # Check if we have an existing agent with active browser
+        if (global_agent is None or 
+            not global_agent.browser or 
+            not global_agent.browser.driver or 
+            not global_agent.browser.is_browser_responsive()):
+            
+            set_message("Initializing new browser session...", reset=False)
+            # Clean up old agent if it exists but browser is unresponsive
+            if global_agent and global_agent.browser and global_agent.browser.driver:
+                try:
+                    global_agent.browser.driver.quit()
+                except:
+                    pass
+            
+            global_agent = NewOrchestrator(goal=goal, message_callback=lambda msg: set_message(msg, reset=False))
+            if not global_agent.browser or not global_agent.browser.driver:
+                set_message("Failed to initialize browser. Please try again.", reset=True)
+                global_agent = None
+                if button:
+                    button.configure(text="Send", image=button_send, command=start_task_thread)
+                return
+        else:
+            set_message("Reusing existing browser session...", reset=False)
+            # Update the goal for the existing agent
+            global_agent.goal = goal
+            # Reset agent state for new task
+            global_agent.plan = []
+            global_agent.completed_steps = []
+            global_agent.current_step_index = 0
+            global_agent.objective_completed = False
+            global_agent.extracted_urls = set()
+            global_agent.current_page_number = 1
+            global_agent.pages_extracted = 0
+            # Update message callback
+            global_agent.message_callback = lambda msg: set_message(msg, reset=False)
+
+        # Run the task with the (possibly reused) agent
+        global_agent.run()
         set_message("Agent has finished its task.", reset=True)
     except Exception as e:
         print(f"An error occurred: {e}")
         set_message(f"Error: {e}", reset=True)
+        # If there was an error, reset the global agent to start fresh next time
+        if global_agent and global_agent.browser and global_agent.browser.driver:
+            try:
+                global_agent.browser.driver.quit()
+            except:
+                pass
+        global_agent = None
     finally:
         if loading_gif:
             loading_gif.stop()
@@ -288,6 +340,14 @@ def main():
     loading_gif.stop()
 
     def on_exit():
+        global global_agent
+        # Clean up browser before closing
+        if global_agent and global_agent.browser and global_agent.browser.driver:
+            try:
+                print("Closing browser before exiting...")
+                global_agent.browser.driver.quit()
+            except Exception as e:
+                print(f"Error closing browser: {e}")
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_exit)

@@ -63,7 +63,7 @@ class DataExtractionAgent:
         
         # Check for format keywords in the task description
         format_keywords = {
-            'excel': ['excel', 'xlsx', 'xls', 'spreadsheet', 'hoja de cálculo', 'csv'],
+            'excel': ['excel', 'xlsx', 'xls', 'spreadsheet', 'hoja de c?lculo', 'csv'],
             'word': ['word', 'docx', 'doc', 'document', 'documento'],
             'txt': ['txt', 'text', 'texto', 'plain text']
         }
@@ -77,9 +77,9 @@ class DataExtractionAgent:
         target_hints = []
         content_patterns = [
             r'product[s]?', r'producto[s]?', r'result[s]?', r'resultado[s]?', 
-            r'data', r'datos?', r'information', r'información', r'content', r'contenido',
-            r'title[s]?', r'título[s]?', r'price[s]?', r'precio[s]?', 
-            r'rating[s]?', r'calificaci[oó]n[es]?', r'link[s]?', r'enlace[s]?'
+            r'data', r'datos?', r'information', r'informaci?n', r'content', r'contenido',
+            r'title[s]?', r't?tulo[s]?', r'price[s]?', r'precio[s]?', 
+            r'rating[s]?', r'calificaci[o?]n[es]?', r'link[s]?', r'enlace[s]?'
         ]
         
         for pattern in content_patterns:
@@ -89,7 +89,7 @@ class DataExtractionAgent:
         # Detect if scrolling or multiple pages are needed
         needs_scrolling = any(word in task_lower for word in [
             'slow', 'lento', 'complete', 'completo', 'all', 'todo', 'todas',
-            'múltiples', 'multiple', 'páginas', 'pages', 'primeras', 'first',
+            'm?ltiples', 'multiple', 'p?ginas', 'pages', 'primeras', 'first',
             'scroll', 'load all', 'cargar todo'
         ])
         
@@ -321,7 +321,7 @@ class DataExtractionAgent:
                                     if (priceEl) {{
                                         const priceText = priceEl.textContent.trim();
                                         if (priceText && priceText.match(/[0-9]/)) {{
-                                            price = priceText.replace(/[^0-9.,€$]/g, '').trim();
+                                            price = priceText.replace(/[^0-9.,?$]/g, '').trim();
                                             if (price) break;
                                         }}
                                     }}
@@ -346,7 +346,7 @@ class DataExtractionAgent:
                                 const link = linkEl ? (linkEl.href.startsWith('http') ? linkEl.href : 'https://amazon.de' + linkEl.href) : 'No link';
                                 
                                 // Determine source page
-                                const pageMatch = currentPage.match(/page=(\d+)/);
+                                const pageMatch = currentPage.match(/page=(\\d+)/);
                                 const sourcePage = pageMatch ? `Page ${{pageMatch[1]}}` : 'Page 1';
                                 
                                 if (title !== 'No title' && title.length > 3) {{
@@ -468,7 +468,7 @@ class DataExtractionAgent:
                                 items.forEach(item => {{
                                     const text = item.textContent.trim().replace(/\\[.*?\\]/g, '');
                                     if (text) {{
-                                        content.push('• ' + text);
+                                        content.push('? ' + text);
                                     }}
                                 }});
                                 content.push('');

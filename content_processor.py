@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Content Processing Agent
-Maneja la extracción, procesamiento y consolidación de contenido de múltiples páginas
+Maneja la extracci?n, procesamiento y consolidaci?n de contenido de m?ltiples p?ginas
 """
 import os
 import json
@@ -13,13 +13,13 @@ from safe_print_utils import safe_print_global as safe_print
 
 class ContentProcessor:
     """
-    Procesa contenido extraído de múltiples páginas web
+    Procesa contenido extra?do de m?ltiples p?ginas web
     """
     
     def __init__(self, browser_controller, llm_controller):
         self.browser = browser_controller
         self.llm = llm_controller
-        self.extracted_pages = []  # Lista de páginas extraídas
+        self.extracted_pages = []  # Lista de p?ginas extra?das
         self.processed_results = []  # Resultados procesados por LLM
         
         # Cargar JavaScript extractor
@@ -33,16 +33,16 @@ class ContentProcessor:
     
     def extract_page_content(self, page_number: int = None) -> Optional[Dict[str, Any]]:
         """
-        Extrae el contenido de la página actual usando JavaScript
+        Extrae el contenido de la p?gina actual usando JavaScript
         """
         if not self.js_extractor_code:
             safe_print("[ERROR] JavaScript extractor not available")
             return None
             
         try:
-            safe_print(f"[EXTRACT] Extrayendo contenido de la página {page_number or 'actual'}...")
+            safe_print(f"[EXTRACT] Extrayendo contenido de la p?gina {page_number or 'actual'}...")
             
-            # Obtener información básica de la página
+            # Obtener informaci?n b?sica de la p?gina
             current_url = self.browser.driver.current_url
             page_title = self.browser.driver.title
             
@@ -68,9 +68,9 @@ class ContentProcessor:
                             content_text = message[start_idx + len(start_marker):end_idx].strip()
                             break
             
-            # Si no se obtuvo contenido de los logs, usar método alternativo
+            # Si no se obtuvo contenido de los logs, usar m?todo alternativo
             if not content_text:
-                safe_print("[INFO] Usando método alternativo de extracción...")
+                safe_print("[INFO] Usando m?todo alternativo de extracci?n...")
                 # Ejecutar JS que retorne el contenido directamente
                 js_return_content = """
                 function extractContent() {
@@ -98,10 +98,10 @@ class ContentProcessor:
                 content_text = self.browser.driver.execute_script(js_return_content)
             
             if not content_text:
-                safe_print("[WARNING] No se pudo extraer contenido de la página")
+                safe_print("[WARNING] No se pudo extraer contenido de la p?gina")
                 return None
             
-            # Crear estructura de datos para la página extraída
+            # Crear estructura de datos para la p?gina extra?da
             page_data = {
                 'page_number': page_number,
                 'url': current_url,
@@ -114,8 +114,8 @@ class ContentProcessor:
             # Guardar en memoria
             self.extracted_pages.append(page_data)
             
-            safe_print(f"[SUCCESS] Contenido extraído: {len(content_text)} caracteres")
-            safe_print(f"[INFO] Título: {page_title}")
+            safe_print(f"[SUCCESS] Contenido extra?do: {len(content_text)} caracteres")
+            safe_print(f"[INFO] T?tulo: {page_title}")
             safe_print(f"[INFO] URL: {current_url}")
             
             return page_data
@@ -126,49 +126,49 @@ class ContentProcessor:
     
     def process_page_with_llm(self, page_data: Dict[str, Any], original_objective: str) -> Optional[Dict[str, Any]]:
         """
-        Procesa el contenido de una página con el LLM según el objetivo original
+        Procesa el contenido de una p?gina con el LLM seg?n el objetivo original
         """
         if not page_data or not page_data.get('content'):
             safe_print("[ERROR] No hay contenido para procesar")
             return None
             
         try:
-            safe_print(f"[LLM] Procesando página {page_data.get('page_number', 'N/A')} con LLM...")
+            safe_print(f"[LLM] Procesando p?gina {page_data.get('page_number', 'N/A')} con LLM...")
             
-            # Crear prompt específico para el procesamiento
+            # Crear prompt espec?fico para el procesamiento
             prompt = f"""
 Objetivo original del usuario: {original_objective}
 
-Contenido extraído de la página:
+Contenido extra?do de la p?gina:
 URL: {page_data.get('url', 'N/A')}
-Título: {page_data.get('title', 'N/A')}
+T?tulo: {page_data.get('title', 'N/A')}
 
 Contenido:
 {page_data['content']}
 
 Instrucciones:
-1. Analiza el contenido extraído según el objetivo original del usuario
-2. Extrae SOLO la información relevante que cumple con el objetivo
-3. Estructura la información de manera clara y organizada
-4. Si el objetivo menciona filtros (como precios, categorías, etc.), aplícalos
-5. Devuelve la información en formato JSON estructurado
+1. Analiza el contenido extra?do seg?n el objetivo original del usuario
+2. Extrae SOLO la informaci?n relevante que cumple con el objetivo
+3. Estructura la informaci?n de manera clara y organizada
+4. Si el objetivo menciona filtros (como precios, categor?as, etc.), apl?calos
+5. Devuelve la informaci?n en formato JSON estructurado
 
 Ejemplo de respuesta esperada:
 {{
     "productos_encontrados": [
-        {{"nombre": "Nombre del producto", "precio": "€XX.XX", "descripcion": "..."}}
+        {{"nombre": "Nombre del producto", "precio": "?XX.XX", "descripcion": "..."}}
     ],
     "resumen": "X productos encontrados que cumplen los criterios",
-    "pagina_info": "Página X de Amazon.de"
+    "pagina_info": "P?gina X de Amazon.de"
 }}
 
-Responde únicamente con el JSON estructurado:
+Responde ?nicamente con el JSON estructurado:
 """
             
             # Enviar al LLM
             response = self.llm.generate_response(
                 prompt, 
-                context="Procesamiento de contenido extraído para objetivo específico"
+                context="Procesamiento de contenido extra?do para objetivo espec?fico"
             )
             
             if response:
@@ -185,12 +185,12 @@ Responde únicamente con el JSON estructurado:
                 # Guardar en memoria
                 self.processed_results.append(processed_result)
                 
-                safe_print(f"[SUCCESS] Página procesada por LLM")
+                safe_print(f"[SUCCESS] P?gina procesada por LLM")
                 safe_print(f"[INFO] Respuesta LLM: {response[:200]}...")
                 
                 return processed_result
             else:
-                safe_print("[ERROR] LLM no devolvió respuesta")
+                safe_print("[ERROR] LLM no devolvi? respuesta")
                 return None
                 
         except Exception as e:
@@ -208,46 +208,46 @@ Responde únicamente con el JSON estructurado:
         try:
             safe_print(f"[CONSOLIDATE] Consolidando {len(self.processed_results)} resultados...")
             
-            # Crear prompt de consolidación
+            # Crear prompt de consolidaci?n
             consolidation_prompt = f"""
 Objetivo original: {original_objective}
 
-Resultados procesados de {len(self.processed_results)} páginas:
+Resultados procesados de {len(self.processed_results)} p?ginas:
 
 """
             
             for i, result in enumerate(self.processed_results, 1):
                 consolidation_prompt += f"""
---- PÁGINA {i} ---
+--- P?GINA {i} ---
 URL: {result.get('url', 'N/A')}
-Título: {result.get('title', 'N/A')}
+T?tulo: {result.get('title', 'N/A')}
 Resultado procesado: {result.get('llm_response', 'N/A')}
 
 """
             
             consolidation_prompt += f"""
-Instrucciones para consolidación:
-1. Combina todos los resultados de las páginas en un informe final coherente
+Instrucciones para consolidaci?n:
+1. Combina todos los resultados de las p?ginas en un informe final coherente
 2. Elimina duplicados si existen
-3. Organiza la información de manera lógica
+3. Organiza la informaci?n de manera l?gica
 4. Crea un resumen ejecutivo al inicio
-5. Incluye estadísticas totales si es relevante
+5. Incluye estad?sticas totales si es relevante
 6. El formato debe ser apropiado para {output_format}
 
 Genera un informe consolidado completo:
 """
             
-            # Enviar al LLM para consolidación
+            # Enviar al LLM para consolidaci?n
             consolidated_response = self.llm.generate_response(
                 consolidation_prompt,
-                context="Consolidación final de resultados multi-página"
+                context="Consolidaci?n final de resultados multi-p?gina"
             )
             
             if consolidated_response:
                 safe_print("[SUCCESS] Resultados consolidados por LLM")
                 return consolidated_response
             else:
-                safe_print("[ERROR] Error en consolidación LLM")
+                safe_print("[ERROR] Error en consolidaci?n LLM")
                 return None
                 
         except Exception as e:
@@ -275,7 +275,7 @@ Genera un informe consolidado completo:
     
     def clear_memory(self):
         """
-        Limpia la memoria después de generar el documento final
+        Limpia la memoria despu?s de generar el documento final
         """
         pages_count = len(self.extracted_pages)
         results_count = len(self.processed_results)
@@ -283,4 +283,4 @@ Genera un informe consolidado completo:
         self.extracted_pages.clear()
         self.processed_results.clear()
         
-        safe_print(f"[CLEANUP] Memoria limpiada: {pages_count} páginas y {results_count} resultados eliminados")
+        safe_print(f"[CLEANUP] Memoria limpiada: {pages_count} p?ginas y {results_count} resultados eliminados")

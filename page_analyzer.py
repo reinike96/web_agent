@@ -125,37 +125,109 @@ class PageAnalyzer:
             text = (element.get("text", "") or "").lower()
             element_type = element.get("type", "")
             
-            # Check for specific TestID patterns (confirmed working)
-            if "loginbutton" in data_testid:
+            # Enhanced login/signup detection patterns
+            login_patterns = [
+                # Direct testid patterns
+                "loginbutton", "login_button", "sign_in_button", "signin_button",
+                # Google/Apple/Social login patterns
+                "google_placeholder_button", "google_sign_in", "google_login",
+                "apple_sign_in_button", "apple_login", "facebook_login",
+                # Generic patterns in testid
+                "login", "signin", "sign_in"
+            ]
+            
+            signup_patterns = [
+                # Direct testid patterns  
+                "signupbutton", "signup_button", "sign_up_button", "register_button",
+                # Social signup patterns
+                "google_placeholder_button", "google_sign_up", "apple_sign_in_button",
+                # Generic patterns
+                "signup", "sign_up", "register", "create_account"
+            ]
+            
+            # Check text content for login/signup indicators
+            login_text_patterns = [
+                "iniciar sesi?n", "log in", "sign in", "entrar", "acceder",
+                "ingresar", "login", "conectarse"
+            ]
+            
+            signup_text_patterns = [
+                "registrarse", "sign up", "crear cuenta", "register", "unirse",
+                "crear perfil", "new account", "join"
+            ]
+            
+            # Check for login indicators
+            is_login = (
+                any(pattern in data_testid for pattern in login_patterns) or
+                any(pattern in text for pattern in login_text_patterns) or
+                ("google" in text and any(word in text for word in ["sign", "login", "inicia"])) or
+                ("apple" in text and any(word in text for word in ["sign", "login", "inicia"]))
+            )
+            
+            # Check for signup indicators
+            is_signup = (
+                any(pattern in data_testid for pattern in signup_patterns) or
+                any(pattern in text for pattern in signup_text_patterns) or
+                ("google" in text and any(word in text for word in ["registr", "crear", "sign up"])) or
+                ("apple" in text and any(word in text for word in ["registr", "crear", "sign up"]))
+            )
+            
+            if is_login:
                 login_buttons.append(element)
-            elif "signupbutton" in data_testid:
+            if is_signup:
                 signup_buttons.append(element)
             
             # Check for CAPTCHA indicators
-            if any(indicator in text for indicator in ["captcha", "verify you're human", "i'm not a robot"]):
+            if any(indicator in text for indicator in ["captcha", "verify you're human", "i'm not a robot", "verificar que eres humano"]):
                 captcha_indicators.append(element)
             
             # Check for functional elements that indicate the site is usable
             if (element_type in ["input", "button", "link"] and 
-                any(keyword in text for keyword in ["search", "article", "read", "browse", "explore", "menu"])):
+                any(keyword in text for keyword in ["search", "article", "read", "browse", "explore", "menu", "buscar", "explorar", "leer"])):
                 functional_elements.append(element)
         
-        # Decision logic - be more conservative about requiring intervention
+        # Decision logic - enhanced detection
         if captcha_indicators:
             return {
                 "requires_intervention": True,
                 "type": "captcha", 
                 "message": "CAPTCHA detected - manual intervention needed",
+                "details": f"Found {len(captcha_indicators)} CAPTCHA indicators",
                 "source": "rule_based"
             }
         
-        # Only require intervention if we have dedicated login/signup AND no functional elements
-        if login_buttons and signup_buttons and len(functional_elements) == 0:
+        # Check if this looks like a dedicated login/signup page
+        total_login_signup = len(login_buttons) + len(signup_buttons)
+        has_social_login = any(
+            any(social in elem.get("text", "").lower() for social in ["google", "apple", "facebook", "twitter"])
+            for elem in login_buttons + signup_buttons
+        )
+        
+        # More sophisticated login page detection
+        is_login_page = (
+            # Has multiple login/signup options
+            total_login_signup >= 2 or
+            # Has social login options (common pattern for dedicated login pages)
+            has_social_login or
+            # Has login buttons but very few functional elements
+            (login_buttons and len(functional_elements) <= 1) or
+            # Has signup buttons but very few functional elements
+            (signup_buttons and len(functional_elements) <= 1)
+        )
+        
+        if is_login_page:
+            login_types = []
+            if login_buttons:
+                login_types.append(f"{len(login_buttons)} login buttons")
+            if signup_buttons:
+                login_types.append(f"{len(signup_buttons)} signup buttons")
+            
             return {
                 "requires_intervention": True,
                 "type": "login",
-                "message": "Dedicated login page detected - no functional elements available",
-                "source": "rule_based"
+                "message": "Login/signup page detected - manual intervention needed",
+                "details": f"Found: {', '.join(login_types)}. Social login: {'Yes' if has_social_login else 'No'}. Functional elements: {len(functional_elements)}",
+                "source": "enhanced_rule_based"
             }
         
         return {

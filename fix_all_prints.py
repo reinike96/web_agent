@@ -1,5 +1,5 @@
 """
-Script mejorado para corregir TODOS los prints problemáticos
+Script mejorado para corregir TODOS los prints problem?ticos
 """
 
 def fix_all_prints():
@@ -8,10 +8,10 @@ def fix_all_prints():
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     
-    # Procesar línea por línea
+    # Procesar l?nea por l?nea
     fixed_lines = []
     for line in lines:
-        # Si la línea contiene print( y no es ya safe_print, convertirla
+        # Si la l?nea contiene print( y no es ya safe_print, convertirla
         if 'print(' in line and 'self.safe_print(' not in line and 'print(f"' not in line.strip():
             # Para prints sin f-string
             if 'print("' in line:
@@ -34,7 +34,7 @@ def fix_all_prints():
     with open(file_path, 'w', encoding='utf-8') as f:
         f.writelines(fixed_lines)
     
-    print("✅ All print statements converted to safe_print")
+    print("[SUCCESS] All print statements converted to safe_print")
 
 if __name__ == "__main__":
     fix_all_prints()

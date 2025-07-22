@@ -1,5 +1,5 @@
 """
-Wrapper para manejar salida segura sin problemas de codificación
+Wrapper para manejar salida segura sin problemas de codificaci?n
 """
 
 def safe_print_global(text: str):
@@ -10,24 +10,24 @@ def safe_print_global(text: str):
         
         # Replace common problematic emojis and Unicode characters
         emoji_replacements = {
-            '🎯': '[TARGET]',
-            '🔧': '[TOOL]',
+            '[TARGET]': '[TARGET]',
+            '[TOOLS]': '[TOOL]',
             '📡': '[SIGNAL]',
-            '🔍': '[SEARCH]',
-            '❌': '[ERROR]',
-            '✅': '[SUCCESS]', 
-            '⚠️': '[WARNING]',
-            '🌐': '[WEB]',
-            '📊': '[DATA]',
-            '📁': '[FILE]',
-            '🔄': '[RELOAD]',
-            '⏳': '[WAIT]',
+            '[SEARCH]': '[SEARCH]',
+            '[ERROR]': '[ERROR]',
+            '[SUCCESS]': '[SUCCESS]', 
+            '[WARNING]': '[WARNING]',
+            '[WEB]': '[WEB]',
+            '[DATA]': '[DATA]',
+            '[FILE]': '[FILE]',
+            '[PROCESSING]': '[RELOAD]',
+            '?': '[WAIT]',
             '📜': '[SCROLL]',
-            '🚀': '[START]',
-            '💡': '[IDEA]',
-            '🎉': '[COMPLETE]',
-            '⏭️': '[SKIP]',
-            '📋': '[LIST]'
+            '[LAUNCH]': '[START]',
+            '[IDEA]': '[IDEA]',
+            '[CELEBRATE]': '[COMPLETE]',
+            '[SKIP]': '[SKIP]',
+            '[LIST]': '[LIST]'
         }
         
         for emoji, replacement in emoji_replacements.items():
