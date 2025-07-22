@@ -57,18 +57,13 @@ class LLMController:
         """
         Generates a JSON command based on the current page interactive elements and goal.
         """
-        # Check if the current step is a data extraction step
+        # Check if the current step mentions data_extraction_agent
         if remaining_steps:
             current_step = remaining_steps[0].lower()
-            extraction_keywords = [
-                "execute javascript", "extraction", "extract data", "download as",
-                "data_extraction_agent", "call data_extraction_agent", "retrieve", "extract",
-                "save as", "export", "scrape", "collect", "gather", "download", "file"
-            ]
-            if any(keyword in current_step for keyword in extraction_keywords):
+            if "data_extraction_agent" in current_step:
                 # This is an extraction step - use the DataExtractionAgent
                 print(f"[DEBUG] Detected extraction step: {current_step}")
-                return self._generate_extraction_action(goal, page_info)
+                return self._generate_extraction_action(goal, current_step, page_info)
         
         interactive_elements = page_info.get("interactive_elements", {})
         page_structure = page_info.get("page_structure", {})
@@ -245,16 +240,8 @@ class LLMController:
         Generates a high-level plan to achieve the user's goal.
         Automatically detects data extraction tasks and creates appropriate plans.
         """
-        # First, check if this is a data extraction task
-        extraction_intent = self.detect_extraction_intent(goal)
-        print(f"[DEBUG] Extraction intent detection result: {extraction_intent}")
         
-        if extraction_intent["is_extraction"]:
-            # For extraction tasks, create a specialized plan that avoids copy/paste/print
-            print(f"[DEBUG] Using extraction plan for goal: {goal}")
-            return self._generate_extraction_plan(extraction_intent)
-        
-        # For non-extraction tasks, use the regular planning approach
+        # For all tasks, use the regular planning approach but instruct LLM to mention data_extraction_agent when needed
         system_prompt = """
         You are a strategic AI that creates a high-level plan to achieve a user's goal on a website.
         Break down the goal into a series of simple, actionable steps.
@@ -265,7 +252,17 @@ class LLMController:
         3. DO NOT include VERIFY steps - text entry and button clicks are successful if they execute without errors
         4. Keep steps sequential and non-redundant
         5. Only include verification for page navigation (optional)
-        6. NEVER suggest copy/paste or print actions for data extraction. You need to call a data_extraction_agent.
+        6. NEVER suggest copy/paste or print actions for data extraction.
+        
+        DATA EXTRACTION TASKS:
+        When the goal involves extracting data, getting information, downloading content to files (Excel, Word, TXT), 
+        collecting results, or saving website content to documents, include steps with these EXACT phrases:
+        - "Extract product data using data_extraction_agent"
+        - "Use data_extraction_agent to collect search results" 
+        - "Execute data_extraction_agent to save content to Excel"
+        - "Run data_extraction_agent to download page content"
+        
+        WRITE CLEARLY: Use simple, clear language. Do NOT repeat words or create corrupted text like "Data Ex Ex Ex".
         
         STEP SEPARATION:
         - Opening/clicking to access something = ONE step
@@ -354,14 +351,14 @@ class LLMController:
         self.logger.info(f"Generated extraction plan for {target} -> {format_type}: {plan_steps}")
         return plan_steps
     
-    def _generate_extraction_action(self, goal: str, page_info: Dict) -> dict:
+    def _generate_extraction_action(self, goal: str, current_step: str, page_info: Dict) -> dict:
         """
         Generates a JavaScript execution action for data extraction using the DataExtractionAgent.
         """
         print(f"[DEBUG] Generating extraction action for goal: {goal}")
         
-        # Detect extraction details using the agent
-        is_extraction, extraction_details = self.data_extraction_agent.detect_extraction_intent(goal)
+        # Use the current step (from the plan) to detect extraction details instead of the original goal
+        is_extraction, extraction_details = self.data_extraction_agent.detect_extraction_intent(current_step)
         print(f"[DEBUG] Extraction details: is_extraction={is_extraction}, details={extraction_details}")
         
         if not is_extraction:
@@ -369,17 +366,23 @@ class LLMController:
             print("[DEBUG] No extraction detected, using wait action as fallback")
             return {"action": "wait", "parameters": {"seconds": 2}}
         
+        # Override format detection if Excel is mentioned in the goal
+        if 'excel' in goal.lower() and extraction_details.get('format') == 'txt':
+            print("[DEBUG] Overriding format to Excel based on goal")
+            extraction_details['format'] = 'excel'
+        
         try:
-            # Generate JavaScript code for extraction
-            print("[DEBUG] Generating JavaScript code for extraction...")
-            js_code = self.data_extraction_agent.generate_extraction_javascript(extraction_details)
-            print(f"[DEBUG] Generated JS code length: {len(js_code)} characters")
+            # Use simple text extraction instead of complex JavaScript generation
+            print("[DEBUG] Using simple page content extraction...")
             
             result_action = {
-                "action": "execute_script",
-                "parameters": {"script": js_code}
+                "action": "extract_simple",
+                "parameters": {
+                    "format": extraction_details.get('format', 'txt'),
+                    "goal": extraction_details.get('goal', goal)
+                }
             }
-            print(f"[DEBUG] Returning extraction action: {result_action['action']}")
+            print(f"[DEBUG] Returning simple extraction action: {result_action['action']}")
             return result_action
         except Exception as e:
             print(f"[ERROR] Error generating extraction action: {e}")
@@ -442,11 +445,33 @@ class LLMController:
         """
         Generates an alternative plan when the original approach fails.
         """
-        system_prompt = """You are a strategic AI that creates alternative plans when the original approach fails.
-        Based on the current page state and what has failed, create a new approach to achieve the goal.
+        system_prompt = """You are a strategic AI that creates SIMPLE alternative plans when the original approach fails.
         
-        Return only a numbered list of steps, nothing else.
-        Be creative and consider different approaches to reach the same goal.
+        IMPORTANT: Use the new simplified extraction approach that ALWAYS works:
+
+        FOR DATA EXTRACTION GOALS:
+        1. Navigate to target URL
+        2. Use data_extraction_agent to extract page content (this ALWAYS works)
+        3. If multiple pages needed, try simple navigation:
+           - Look for "Next" or "Weiter" buttons
+           - If navigation fails, try URL modification (add ?page=2, &page=2, etc.)
+           - Or accept single page extraction
+        4. Use data_extraction_agent on each page
+        5. System will automatically consolidate results
+
+        AVOID:
+        - Complex JavaScript snippets
+        - Browser console commands  
+        - Specific CSS selectors that might not exist
+        - Complex extraction logic
+
+        PREFER:
+        - Simple navigation steps
+        - Generic button clicking
+        - URL manipulation for pagination
+        - Let data_extraction_agent handle the extraction details
+
+        Return only a numbered list of simple steps, nothing else.
         """
         
         interactive_elements = current_page_info.get("interactive_elements", {})

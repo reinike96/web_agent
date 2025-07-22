@@ -12,8 +12,8 @@
   }
 
   function getText(el) {
-    const t = el.innerText?.trim();
-    if (t) return t;
+    const text = el.innerText?.trim();
+    if (text) return text;
     const aria = el.getAttribute("aria-label");
     if (aria) return aria.trim();
     const title = el.getAttribute("title");
@@ -23,10 +23,10 @@
     return null;
   }
 
-  const elements = Array.from(document.querySelectorAll("button, input"))
+  const elements = Array.from(document.querySelectorAll("button, input, [role='button']"))
     .filter(e =>
-      e.offsetParent !== null &&               // visible
-      (!e.disabled) &&                         // usable
+      e.offsetParent !== null &&
+      (!e.disabled) &&
       (getText(e) || e.getAttribute("data-testid") || e.name)
     )
     .map(e => {
@@ -41,12 +41,23 @@
       };
     });
 
+  const seen = new Set();
+  const uniqueElements = elements.filter(el => {
+    const key = `${el.tag}::${el.text}`;
+    if (seen.has(key)) {
+      return false;
+    } else {
+      seen.add(key);
+      return true;
+    }
+  });
+
   const output = {
     url: location.href,
     title: document.title,
-    elements
+    elements: uniqueElements
   };
 
-  console.log(output);
+  console.log(JSON.stringify(output, null, 2));
   return output;
 })();

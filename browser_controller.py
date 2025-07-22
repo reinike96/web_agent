@@ -82,7 +82,7 @@ class BrowserController:
             print(f"Element not found ({by}={value}): {e}")
             return None
 
-    def safe_click(self, by: By, value: str, timeout: int = 10, retries: int = 3) -> bool:
+    def safe_click(self, by: By, value: str, timeout: int = 10, retries: int = 1) -> bool:
         for i in range(retries):
             try:
                 element = WebDriverWait(self.driver, timeout).until(
@@ -112,7 +112,7 @@ class BrowserController:
         
         return False
 
-    def safe_send_keys(self, by: By, value: str, text: str, timeout: int = 10, retries: int = 3, press_enter: bool = True) -> bool:
+    def safe_send_keys(self, by: By, value: str, text: str, timeout: int = 10, retries: int = 1, press_enter: bool = True) -> bool:
         for i in range(retries):
             try:
                 element = WebDriverWait(self.driver, timeout).until(
@@ -243,7 +243,7 @@ class BrowserController:
         """Enters text without pressing Enter - useful for composers, forms, etc."""
         return self.safe_send_keys_rich_text(By.CSS_SELECTOR, selector, text, press_enter=False)
 
-    def safe_send_keys_rich_text(self, by: By, value: str, text: str, timeout: int = 10, retries: int = 3, press_enter: bool = True) -> bool:
+    def safe_send_keys_rich_text(self, by: By, value: str, text: str, timeout: int = 10, retries: int = 1, press_enter: bool = True) -> bool:
         """
         Enhanced text entry method specifically for rich text editors like X.com.
         Uses multiple strategies including simulated typing to ensure X.com detects the input.
