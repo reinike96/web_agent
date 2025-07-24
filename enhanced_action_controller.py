@@ -1080,6 +1080,50 @@ ACTION FAILED: {action.get('action', '')} unsuccessful.
                 "message": f"Exception in programmatic text entry: {str(e)}"
             }
 
+    def _determine_action_context(self, action_type: str, parameters: dict, goal: str = "") -> str:
+        """
+        Determina el contexto específico de una acción para que el LLM pueda actuar de forma más precisa.
+        """
+        # Convertir a minúsculas para análisis
+        goal_lower = goal.lower() if goal else ""
+        
+        if action_type == "click_button":
+            keywords = parameters.get("keywords", [])
+            keywords_str = " ".join(keywords).lower() if keywords else ""
+            
+            # Contexto para abrir composers/editores
+            if ("post" in keywords_str or "tweet" in keywords_str) and ("composer" in goal_lower or "escribir" in goal_lower or "publish" in goal_lower):
+                return "Click the MAIN composer/post creation button to open text editor - avoid clicking on message/chat input fields or reply boxes"
+            
+            # Contexto para publicar/enviar
+            elif ("post" in keywords_str or "tweet" in keywords_str or "send" in keywords_str) and any(word in goal_lower for word in ["send", "publish", "post", "submit"]):
+                return "Click the SUBMIT/PUBLISH button to send/post content - look for final action buttons like 'Post', 'Send', 'Submit'"
+            
+            # Contexto para navegación
+            elif any(word in keywords_str for word in ["login", "signup", "sign", "continue"]):
+                return "Click authentication/navigation button - look for login, signup, or continue buttons"
+            
+            # Contexto general
+            else:
+                return f"Click button with keywords {keywords} - be specific and avoid ambiguous matches"
+        
+        elif action_type == "enter_text_no_enter":
+            text = parameters.get("text", "")
+            if "composer" in goal_lower or "post" in goal_lower or "tweet" in goal_lower:
+                return f"Enter text '{text}' into the main content composer/editor - avoid chat boxes or reply fields"
+            else:
+                return f"Enter text '{text}' into the appropriate input field based on context"
+        
+        elif action_type == "click_element":
+            selector = parameters.get("selector", "")
+            if "composer" in goal_lower or "post" in goal_lower:
+                return f"Click element {selector} to access content creation interface"
+            else:
+                return f"Click specific element {selector} as part of the automation"
+        
+        else:
+            return f"Perform {action_type} action with given parameters in context of: {goal}"
+
     def _llm_action_with_verification(self, action: dict, current_elements: dict, original_goal: str = "") -> dict:
         """
         Ejecuta acción con LLM y verificación automática de éxito.
@@ -1096,6 +1140,9 @@ ACTION FAILED: {action.get('action', '')} unsuccessful.
             # PASO 1: Crear prompt con enfoque en verificación de éxito
             current_action_description = f"Perform {action_type} with parameters: {parameters}"
             
+            # Determinar contexto específico de la acción
+            action_context = self._determine_action_context(action_type, parameters, original_goal)
+            
             llm_prompt = f"""
 OVERALL GOAL: {original_goal if original_goal else "Web automation task"}
 
@@ -1103,6 +1150,7 @@ TASK: Generate JavaScript code that performs an action AND verifies its success.
 
 ACTION TO PERFORM: {action_type}
 ACTION PARAMETERS: {json.dumps(parameters, indent=2)}
+ACTION CONTEXT: {action_context}
 
 AVAILABLE PAGE ELEMENTS (live from current page):
 {json.dumps(elements, indent=2)}
@@ -1119,6 +1167,7 @@ CRITICAL REQUIREMENTS:
 5. MUST return object with success:true/false and verification details
 6. Code must verify the action actually worked (text was entered, button was clicked, etc.)
 7. INCLUDE the simulatePaste function definition in your code - do not just call it
+8. CONTEXT AWARENESS: {action_context}
 
 COMPLETE SIMULATEPASTE FUNCTION (copy this entire function into your code):
 function simulatePaste(element, text) {{

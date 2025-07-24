@@ -385,6 +385,13 @@ CODE USED:
         - Typing content = SEPARATE step  
         - Publishing/submitting = SEPARATE step (final step)
         
+        SPECIFIC ACTION WORDING:
+        For content creation (posts, messages, comments):
+        - Use "Open the content composer" or "Access the posting interface" instead of generic "click post button"
+        - Be specific: "Click the main compose button to open text editor" vs "Click on any message field"
+        - Avoid ambiguous terms like "post button" that could match multiple elements
+        - Focus on the ACTION (opening composer) not the UI element name
+        
         NO VERIFICATION NEEDED FOR:
         - Text entry (if it types, it worked)
         - Button clicks (if it clicks, it worked)
@@ -551,14 +558,24 @@ CODE USED:
             print(f"Error verifying step completion: {e}")
             return False
 
-    def generate_alternative_plan(self, original_goal: str, failed_steps: list[str], current_page_info: Dict) -> list[str]:
+    def generate_alternative_plan(self, original_goal: str, failed_steps: list[str], current_page_info: Dict, completed_steps: list[str] = None) -> list[str]:
         """
         Generates an alternative plan when the original approach fails.
         """
-        system_prompt = """You are a strategic AI that creates SIMPLE alternative plans when the original approach fails.
+        system_prompt = """You are a strategic AI that creates SMART alternative plans when the original approach fails.
         
-        IMPORTANT: Use the new simplified extraction approach that ALWAYS works:
+        CRITICAL ANTI-DUPLICATION RULES:
+        1. ANALYZE what core objectives may have ALREADY been completed
+        2. DO NOT recreate steps for objectives that are likely already achieved
+        3. FOCUS ONLY on the specific failed steps, not the entire original goal
+        4. If posting/publishing goals: Check if posts were already made successfully in earlier steps
+        5. If extraction goals: Check if data was already extracted in earlier steps
 
+        FOR POSTING/PUBLISHING OBJECTIVES:
+        - If previous steps show successful posting actions, DO NOT create new posting steps
+        - Focus only on navigation or technical issues, not content recreation
+        - AVOID duplicating: "Type message", "Click post", "Enter text" if posts were already made
+        
         FOR DATA EXTRACTION GOALS:
         1. Navigate to target URL
         2. Use data_extraction_agent to extract page content (this ALWAYS works)
@@ -569,16 +586,21 @@ CODE USED:
         5. System will automatically consolidate results
 
         AVOID:
+        - Recreating content that was already posted/published
         - Complex JavaScript snippets
         - Browser console commands  
         - Specific CSS selectors that might not exist
-        - Complex extraction logic
+        - Duplicating core objectives that were already completed
 
         PREFER:
-        - Simple navigation steps
-        - Generic button clicking
+        - Simple navigation fixes
+        - Technical troubleshooting steps
+        - Generic button clicking for navigation only
         - URL manipulation for pagination
         - Let data_extraction_agent handle the extraction details
+
+        SMART ANALYSIS: Before creating new steps, consider if the main goal was already achieved
+        and only create steps to resolve specific technical issues.
 
         Return only a numbered list of simple steps, nothing else.
         """
@@ -614,8 +636,11 @@ CODE USED:
         user_prompt = f"""
         Original Goal: "{original_goal}"
         
-        Failed Steps:
-        {chr(10).join(f"- {step}" for step in failed_steps)}
+        ALREADY COMPLETED STEPS (DO NOT DUPLICATE):
+        {chr(10).join(f"✅ {step}" for step in (completed_steps or []))}
+        
+        Failed Steps (need alternatives for):
+        {chr(10).join(f"❌ {step}" for step in failed_steps)}
         
         Current Page State:
         URL: {interactive_elements.get('url', 'N/A')}
@@ -623,7 +648,11 @@ CODE USED:
         
         {elements_info}
         
-        Create an alternative plan to achieve the original goal.
+        IMPORTANT: Analyze the completed steps above. If core posting/publishing objectives were 
+        already achieved successfully, DO NOT create new steps that would duplicate content.
+        Only create steps to resolve specific technical issues or navigation problems.
+        
+        Create a smart alternative plan that avoids duplicating completed objectives.
         """
 
         messages = [

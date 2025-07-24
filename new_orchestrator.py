@@ -486,21 +486,88 @@ class NewOrchestrator:
         current_page_info = self.page_analyzer.get_comprehensive_page_info()
         failed_steps = self.plan[self.current_step_index:]
         
+        # IMPROVED: Check if core objectives are already achieved before generating alternatives
+        if self._core_objectives_completed():
+            self.safe_print("Core objectives already completed - skipping alternative plan")
+            return False
+        
         alternative_plan = self.llm.generate_alternative_plan(
-            self.goal, failed_steps, current_page_info
+            self.goal, failed_steps, current_page_info, self.completed_steps
         )
         
         if alternative_plan:
+            # IMPROVED: Filter out steps that duplicate already completed core actions
+            filtered_plan = self._filter_duplicate_objectives(alternative_plan)
+            
+            if not filtered_plan:
+                self.safe_print("Alternative plan would duplicate completed objectives - skipping")
+                return False
+            
             self.safe_print("Alternative plan generated:")
-            for i, step in enumerate(alternative_plan):
+            for i, step in enumerate(filtered_plan):
                 self.safe_print(f"{i+1}. {step}")
             
-            # Replace remaining steps with alternative plan
-            self.plan = self.completed_steps + alternative_plan
+            # Replace remaining steps with filtered alternative plan
+            self.plan = self.completed_steps + filtered_plan
             self.current_step_index = len(self.completed_steps)
             return True
         
         return False
+
+    def _core_objectives_completed(self) -> bool:
+        """
+        Check if the main objectives of the goal have been completed to avoid duplication.
+        """
+        goal_lower = self.goal.lower()
+        completed_lower = " ".join(self.completed_steps).lower()
+        
+        # For posting goals, check if posts have been made
+        if any(word in goal_lower for word in ["post", "tweet", "publish", "send"]):
+            # Count how many posting actions were completed
+            post_count = sum(1 for step in self.completed_steps 
+                           if any(word in step.lower() for word in ["post", "tweet", "publish", "click.*post"]))
+            
+            # If we've made posts, check if goal is likely complete
+            if post_count >= 2:  # For typical multi-post goals
+                self.safe_print(f"Detected {post_count} posting actions completed - core objectives likely met")
+                return True
+        
+        # For data extraction goals
+        if any(word in goal_lower for word in ["extract", "download", "save", "collect"]):
+            if any(word in completed_lower for word in ["extract", "download", "save", "data_extraction_agent"]):
+                self.safe_print("Data extraction objective appears completed")
+                return True
+        
+        return False
+
+    def _filter_duplicate_objectives(self, alternative_plan: list) -> list:
+        """
+        Filter out steps from alternative plan that would duplicate core objectives already completed.
+        """
+        goal_lower = self.goal.lower()
+        completed_lower = " ".join(self.completed_steps).lower()
+        filtered_plan = []
+        
+        for step in alternative_plan:
+            step_lower = step.lower()
+            
+            # Skip posting steps if we've already completed posting objectives
+            if any(word in goal_lower for word in ["post", "tweet", "publish"]):
+                if any(word in step_lower for word in ["post", "tweet", "publish", "type", "enter"]) and \
+                   any(word in completed_lower for word in ["post", "tweet", "publish"]):
+                    self.safe_print(f"Skipping duplicate posting step: {step}")
+                    continue
+            
+            # Skip extraction steps if we've already done extraction
+            if any(word in goal_lower for word in ["extract", "download", "save"]):
+                if any(word in step_lower for word in ["extract", "download", "save", "data_extraction_agent"]) and \
+                   any(word in completed_lower for word in ["extract", "download", "save"]):
+                    self.safe_print(f"Skipping duplicate extraction step: {step}")
+                    continue
+            
+            filtered_plan.append(step)
+        
+        return filtered_plan
 
     def handle_manual_intervention(self, intervention_info: Dict) -> bool:
         """Handle manual intervention when needed."""
