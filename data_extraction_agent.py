@@ -146,7 +146,7 @@ class DataExtractionAgent:
                     {"role": "system", "content": "You are a JavaScript expert specializing in web data extraction and file generation."},
                     {"role": "user", "content": extraction_prompt}
                 ],
-                max_tokens=2000,
+                # Removed max_tokens to allow complete response
                 temperature=0.1
             )
             

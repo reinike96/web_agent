@@ -261,7 +261,7 @@ try:
                             {"role": "system", "content": "You are an expert at consolidating information. Complete the user's task exactly as specified."},
                             {"role": "user", "content": final_consolidation_prompt}
                         ],
-                        max_tokens=1000,
+                        # Removed max_tokens to allow complete response
                         temperature=0.1
                     )
                     

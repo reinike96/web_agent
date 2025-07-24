@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from typing import Dict, List
+from datetime import datetime
 from groq import Groq
 from data_extraction_agent import DataExtractionAgent
 
@@ -24,16 +25,83 @@ class LLMController:
         # Initialize data extraction agent
         self.data_extraction_agent = DataExtractionAgent(self.client)
 
-        # Setup logger with UTF-8 encoding
+        # Setup simplified daily logger 
+        self.log_dir = os.path.dirname(__file__)
+        self.log_file_path = os.path.join(self.log_dir, 'llm_interaction.log')
+        self._setup_daily_logger()
+        
+        # Track session info
+        self.current_goal = None
+        self.current_plan = None
+    
+    def _setup_daily_logger(self):
+        """Setup logger that resets daily and only logs essential info"""
+        # Check if we need to reset the log file (daily reset)
+        self._reset_log_if_new_day()
+        
+        # Setup basic logging without timestamp/level (simplified format)
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
-        log_dir = os.path.dirname(__file__)
-        log_file_path = os.path.join(log_dir, 'llm_interaction.log')
-        file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # Remove existing handlers
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+        
+        # Add new file handler with simplified format
+        file_handler = logging.FileHandler(self.log_file_path, encoding='utf-8')
+        formatter = logging.Formatter('%(message)s')  # Only the message, no timestamp
         file_handler.setFormatter(formatter)
-        if not self.logger.handlers: # Avoid adding multiple handlers if already initialized
-            self.logger.addHandler(file_handler)
+        self.logger.addHandler(file_handler)
+    
+    def _reset_log_if_new_day(self):
+        """Reset log file if it's a new day"""
+        try:
+            if os.path.exists(self.log_file_path):
+                # Get file creation time
+                file_time = datetime.fromtimestamp(os.path.getctime(self.log_file_path))
+                current_time = datetime.now()
+                
+                # If file is from a different day, reset it
+                if file_time.date() != current_time.date():
+                    with open(self.log_file_path, 'w', encoding='utf-8') as f:
+                        f.write(f"=== LOG RESET - {current_time.strftime('%Y-%m-%d')} ===\n\n")
+            else:
+                # Create new log file
+                with open(self.log_file_path, 'w', encoding='utf-8') as f:
+                    f.write(f"=== NEW LOG - {datetime.now().strftime('%Y-%m-%d')} ===\n\n")
+        except Exception as e:
+            print(f"Warning: Could not reset log file: {e}")
+    
+    def log_goal_and_plan(self, goal: str, plan: List[str]):
+        """Log only the goal and plan at the start of session"""
+        self.current_goal = goal
+        self.current_plan = plan
+        
+        log_entry = f"""
+=== SESSION START ===
+GOAL: {goal}
+
+PLAN:
+"""
+        for i, step in enumerate(plan, 1):
+            log_entry += f"{i}. {step}\n"
+        
+        log_entry += "\n" + "="*50 + "\n"
+        self.logger.info(log_entry)
+    
+    def log_action_code(self, action_type: str, method_used: str, code_used: str, success: bool):
+        """Log only the essential code information for each action"""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        status = "✅ SUCCESS" if success else "❌ FAILED"
+        
+        log_entry = f"""
+[{timestamp}] ACTION: {action_type} ({method_used}) - {status}
+CODE USED:
+{code_used}
+
+---
+"""
+        self.logger.info(log_entry)
     
     def clean_unicode_for_logging(self, text: str) -> str:
         """Clean Unicode characters that might cause encoding issues in logging."""
@@ -54,15 +122,17 @@ class LLMController:
             # If all else fails, return a safe version
             return str(text).encode('ascii', 'replace').decode('ascii')
 
-    def ask_llm_with_context(self, prompt: str, page_context: dict = None, max_tokens: int = 1500) -> str:
+    def ask_llm_with_context(self, prompt: str, page_context: dict = None) -> str:
         """
         Generic method to ask the LLM with a prompt and optional page context.
         Used by fallback systems and other generic LLM interactions.
+        NO TOKEN LIMITS - allows full response generation.
         """
         try:
             system_prompt = "You are an expert web automation assistant. Generate precise JavaScript code for web interactions."
             
             if page_context:
+                # Include ALL context data without limits
                 context_info = f"\nPage Context: {json.dumps(page_context, indent=2)}\n"
                 user_content = context_info + prompt
             else:
@@ -73,21 +143,20 @@ class LLMController:
                 {"role": "user", "content": user_content}
             ]
             
-            self.logger.info(f"Sending to LLM (ask_llm_with_context):\nPrompt: {prompt[:200]}...")
-            
+            # No detailed logging here - will be handled by the action controller
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
-                model=self.model,
-                max_tokens=max_tokens
+                model=self.model
+                # NO max_tokens restriction - allow full generation
             )
             
             response = chat_completion.choices[0].message.content.strip()
-            self.logger.info(f"Received from LLM (ask_llm_with_context):\n{response[:200]}...")
             
             return response
             
         except Exception as e:
-            self.logger.error(f"Error in ask_llm_with_context: {e}")
+            # Only log errors, not regular interactions
+            print(f"Error in ask_llm_with_context: {e}")
             return ""
             
     def generate_action_from_page_info(self, goal: str, remaining_steps: list[str], completed_steps: list[str], page_info: Dict) -> dict:
@@ -155,8 +224,9 @@ class LLMController:
             
             return priority
         
-        # Sort by priority and take top 15 elements
-        sorted_elements = sorted(elements_list, key=element_priority, reverse=True)[:15]
+        # Sort by priority and provide ALL elements without limit
+        sorted_elements = sorted(elements_list, key=element_priority, reverse=True)
+        # NO LIMIT - provide all elements to LLM
         
         for i, element in enumerate(sorted_elements):
             elements_info += f"{i+1}. {element.get('tag', 'unknown')} - Selector: {element.get('selector', 'N/A')}\n"
@@ -370,13 +440,7 @@ class LLMController:
         
         # Step 1: Navigate to target page (if URL is in goal)
         goal_lower = target.lower()
-        if "wikipedia" in goal_lower or "wiki" in goal_lower:
-            if "imperio romano" in goal_lower or "roman empire" in goal_lower:
-                plan_steps.append("1. Navigate to https://es.wikipedia.org/wiki/Imperio_romano")
-            else:
-                plan_steps.append("1. Navigate to https://es.wikipedia.org")
-                plan_steps.append("2. Search for the specified topic")
-        elif any(url_indicator in goal_lower for url_indicator in ["http", "www.", ".com", ".org", ".net"]):
+        if any(url_indicator in goal_lower for url_indicator in ["http", "www.", ".com", ".org", ".net"]):
             plan_steps.append("1. Navigate to the specified URL")
         else:
             plan_steps.append("1. Navigate to the target page")
@@ -477,8 +541,8 @@ class LLMController:
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
-                model=self.model,
-                max_tokens=10
+                model=self.model
+                # Removed max_tokens to allow full response
             )
             response = chat_completion.choices[0].message.content.strip().lower()
             self.logger.info(f"Received from LLM (verify_step_completion_with_page_info): {response}")
@@ -501,7 +565,6 @@ class LLMController:
         3. If multiple pages needed, try simple navigation:
            - Look for "Next" or "Weiter" buttons
            - If navigation fails, try URL modification (add ?page=2, &page=2, etc.)
-           - Or accept single page extraction
         4. Use data_extraction_agent on each page
         5. System will automatically consolidate results
 
@@ -542,7 +605,8 @@ class LLMController:
             
             return priority
         
-        sorted_elements = sorted(elements_list, key=element_priority, reverse=True)[:10]
+        sorted_elements = sorted(elements_list, key=element_priority, reverse=True)
+        # NO LIMIT - provide all elements for complete alternative planning
         
         for i, element in enumerate(sorted_elements):
             elements_info += f"{i+1}. {element.get('tag', 'unknown')} - {element.get('text', 'N/A')}\n"
@@ -640,8 +704,8 @@ class LLMController:
             
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
-                model=self.model,
-                max_tokens=10
+                model=self.model
+                # Removed max_tokens to allow full response
             )
             
             response = chat_completion.choices[0].message.content.strip().lower()
@@ -688,8 +752,7 @@ class LLMController:
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
-                model=self.model,
-                max_tokens=200
+                model=self.model
             )
             response = chat_completion.choices[0].message.content.strip()
             
@@ -862,9 +925,9 @@ class LLMController:
         Analyzes the JSON elements and decides based on patterns.
         """
         try:
-            # Create a simplified summary of elements for the LLM
+            # Create a complete summary of ALL elements for the LLM
             element_summary = []
-            for element in page_elements[:20]:  # Limit to first 20 elements to avoid token limits
+            for element in page_elements:  # NO LIMIT - provide all elements
                 summary = {
                     "tag": element.get("tag"),
                     "text": element.get("text"),
@@ -1113,8 +1176,8 @@ class LLMController:
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
-                model=self.model,
-                max_tokens=2000  # Allow for longer responses since we're generating complete code
+                model=self.model
+                # Removed max_tokens to allow unlimited response generation
             )
             js_code = chat_completion.choices[0].message.content.strip()
             self.logger.info(f"Received extraction script from LLM (length: {len(js_code)} chars)")

@@ -167,7 +167,7 @@ Responde ?NICAMENTE con el contenido CSV, comenzando directamente con los encabe
                         "content": llm_prompt
                     }
                 ],
-                max_tokens=4000,
+                # Removed max_tokens to allow complete response
                 temperature=0.1
             )
             

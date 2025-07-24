@@ -23,11 +23,36 @@
     return null;
   }
 
-  const elements = Array.from(document.querySelectorAll("button, input, [role='button']"))
-    .filter(e =>
-      e.offsetParent !== null &&
-      (!e.disabled) &&
-      (getText(e) || e.getAttribute("data-testid") || e.name)
+  function isVisibleAndEnabled(e) {
+    return e.offsetParent !== null && !e.disabled;
+  }
+
+  function isEditable(e) {
+    if (e.tagName.toLowerCase() === 'input' || e.tagName.toLowerCase() === 'textarea') {
+      return !e.readOnly && isVisibleAndEnabled(e);
+    }
+    if (e.isContentEditable) {
+      return isVisibleAndEnabled(e);
+    }
+    return false;
+  }
+
+  function isActionableButton(e) {
+    const tag = e.tagName.toLowerCase();
+    if (tag === 'button' || tag === 'input' || e.getAttribute('role') === 'button') {
+      return isVisibleAndEnabled(e);
+    }
+    return false;
+  }
+
+  const elements = Array.from(document.querySelectorAll("button, input, [role='button'], [contenteditable='true']"))
+    .filter(e => 
+      (
+        isEditable(e) || isActionableButton(e)
+      ) &&
+      (
+        getText(e) || e.getAttribute("data-testid") || e.name
+      )
     )
     .map(e => {
       return {
@@ -37,7 +62,8 @@
         name: e.getAttribute("name") || null,
         placeholder: e.getAttribute("placeholder") || null,
         "data-testid": e.getAttribute("data-testid") || null,
-        "aria-label": e.getAttribute("aria-label") || null
+        "aria-label": e.getAttribute("aria-label") || null,
+        contenteditable: e.isContentEditable || null
       };
     });
 

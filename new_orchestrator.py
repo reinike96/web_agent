@@ -140,6 +140,9 @@ class NewOrchestrator:
             self.safe_print("Failed to generate a plan. Aborting.")
             return
 
+        # Log goal and plan to simplified log file
+        self.llm.log_goal_and_plan(self.goal, self.plan)
+
         self.safe_print("Plan generated:")
         for i, task in enumerate(self.plan):
             self.safe_print(f"{i+1}. {task}")
@@ -536,7 +539,7 @@ class NewOrchestrator:
         enhanced_actions = ["click_element", "enter_text", "enter_text_no_enter", "click_button"]
         
         if action_name in enhanced_actions:
-            self.safe_print(f"? Using Hybrid Action Controller (Programmatic + LLM Fallback) for {action_name}")
+            self.safe_print(f"⚡ Using LLM-Only Action Controller for {action_name}")
             
             # Verificar si la acci?n es redundante en el contexto actual
             current_state = self.enhanced_action_controller._analyze_page_state(page_info)
@@ -546,8 +549,8 @@ class NewOrchestrator:
                 self.safe_print(f"[SKIP] Skipping action: {skip_reason}")
                 return True
             
-            # Ejecutar con m?todo h?brido: program?tico primero, LLM fallback si falla
-            result = self.enhanced_action_controller.execute_action_with_llm_fallback(action, page_info)
+            # Ejecutar con método híbrido: programático primero, LLM fallback si falla
+            result = self.enhanced_action_controller.execute_action_with_llm_fallback(action, page_info, self.goal)
             
             # Mostrar informaci?n sobre qu? m?todo fue usado
             method_used = result.get("method_used", "unknown")

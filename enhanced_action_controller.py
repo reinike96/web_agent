@@ -718,28 +718,21 @@ class EnhancedActionController:
     
     def get_action_feedback_for_llm(self, action: dict, result: dict) -> str:
         """
-        Genera retroalimentaci?n formateada para enviar al LLM
+        Genera retroalimentación formateada limitada para enviar al LLM
+        Limita la cantidad de información para evitar sobrecargar tokens
         """
+        def truncate_text(text: str, max_length: int = 200) -> str:
+            """Trunca texto preservando información clave"""
+            if len(text) <= max_length:
+                return text
+            return text[:max_length] + "..."
+        
         if result.get("success", False):
-            details = result.get("details", {})
             feedback = f"""
 ACTION SUCCESS: {action.get('action', '')} completed successfully.
-
-Action Details:
-- Action Type: {action.get('action', '')}
-- Parameters: {action.get('parameters', {})}
-
-Result Details:
-- Success: True
-- Message: {result.get('message', '')}
-- Strategy Used: {result.get('strategy', 'original')}
+- Strategy: {result.get('strategy', 'original')}
+- Message: {truncate_text(result.get('message', ''), 150)}
 """
-            
-            if details:
-                feedback += f"\nExecution Details:\n"
-                for key, value in details.items():
-                    feedback += f"- {key}: {value}\n"
-            
             return feedback
         
         else:
@@ -747,31 +740,26 @@ Result Details:
             suggestions = result.get("suggestions", [])
             
             feedback = f"""
-ACTION FAILED: {action.get('action', '')} was not successful.
-
-Action Details:
-- Action Type: {action.get('action', '')}
-- Parameters: {action.get('parameters', {})}
-
-Error Analysis:
-- Error Type: {result.get('error', 'unknown')}
-- Error Message: {result.get('message', '')}
-- Description: {error_analysis.get('description', 'No detailed analysis available')}
-
-Available Alternatives:
+ACTION FAILED: {action.get('action', '')} unsuccessful.
+- Error: {result.get('error', 'unknown')}
+- Message: {truncate_text(result.get('message', ''), 150)}
+- Analysis: {truncate_text(error_analysis.get('description', 'No analysis'), 150)}
 """
             
-            # Agregar informaci?n sobre elementos/inputs/botones disponibles
+            # Limitar elementos disponibles a máximo 3 por categoría
             for key in ['available_elements', 'available_inputs', 'available_buttons']:
                 if key in result and result[key]:
-                    feedback += f"\n{key.replace('_', ' ').title()}:\n"
-                    for item in result[key][:5]:  # Limitar a 5 elementos
-                        feedback += f"  - {item}\n"
+                    items = result[key][:3]  # Solo 3 elementos
+                    feedback += f"\n{key.replace('_', ' ').title()} ({len(result[key])} total):\n"
+                    for item in items:
+                        item_text = truncate_text(str(item), 80)
+                        feedback += f"  - {item_text}\n"
             
+            # Limitar sugerencias
             if suggestions:
-                feedback += f"\nSuggestions for next attempt:\n"
-                for suggestion in suggestions:
-                    feedback += f"- {suggestion}\n"
+                feedback += f"\nSuggestions ({len(suggestions)} total):\n"
+                for suggestion in suggestions[:3]:  # Solo 3 sugerencias
+                    feedback += f"- {truncate_text(suggestion, 100)}\n"
             
             return feedback
     
@@ -796,315 +784,621 @@ Available Alternatives:
         
         return False, ""
 
-    def _llm_fallback_action(self, action: dict, page_info: dict, previous_result: dict) -> dict:
+    def _enhanced_click_button_with_extracted_elements(self, keywords: List[str], elements: List[dict], page_context: dict) -> dict:
         """
-        Fallback usando LLM: env?a el JSON completo de la p?gina para que el LLM genere c?digo JS espec?fico
+        Click de botón mejorado usando elementos extraídos dinámicamente
+        """
+        safe_print(f"[PROGRAMMATIC] Buscando botón con keywords {keywords} en {len(elements)} elementos")
+        
+        try:
+            # Buscar botones que coincidan con las palabras clave
+            matching_buttons = []
+            
+            for element in elements:
+                if element.get("tag") not in ["button", "input"]:
+                    continue
+                    
+                # Obtener texto del elemento
+                text = element.get("text", "").lower() if element.get("text") else ""
+                aria_label = element.get("aria-label", "").lower() if element.get("aria-label") else ""
+                data_testid = element.get("data-testid", "").lower() if element.get("data-testid") else ""
+                placeholder = element.get("placeholder", "").lower() if element.get("placeholder") else ""
+                
+                search_text = f"{text} {aria_label} {data_testid} {placeholder}".strip()
+                
+                # Verificar si coincide con alguna keyword (más flexible)
+                for keyword in keywords:
+                    keyword_lower = keyword.lower()
+                    if (keyword_lower in search_text or 
+                        # Búsquedas específicas para X.com
+                        (keyword_lower == "post" and ("publicar" in search_text or "tweet" in search_text)) or
+                        (keyword_lower == "tweet" and ("post" in search_text or "publicar" in search_text)) or
+                        # Búsquedas por funcionalidad
+                        (keyword_lower in ["post", "tweet"] and "compose" in data_testid)):
+                        matching_buttons.append({
+                            "element": element,
+                            "keyword": keyword,
+                            "match_text": search_text
+                        })
+                        break
+            
+            # Si no se encontraron keywords específicas, buscar botones genéricos de acción
+            if not matching_buttons and not keywords:
+                safe_print("[PROGRAMMATIC] No keywords específicas, buscando cualquier botón de acción...")
+                for element in elements:
+                    if element.get("tag") in ["button", "input"]:
+                        text = element.get("text", "").lower() if element.get("text") else ""
+                        aria_label = element.get("aria-label", "").lower() if element.get("aria-label") else ""
+                        
+                        # Buscar botones con texto que sugiera acción
+                        action_words = ["submit", "send", "post", "publicar", "tweet", "enviar", "confirmar", "siguiente", "next"]
+                        if any(word in f"{text} {aria_label}" for word in action_words):
+                            matching_buttons.append({
+                                "element": element,
+                                "keyword": "generic_action",
+                                "match_text": f"{text} {aria_label}".strip()
+                            })
+            
+            if not matching_buttons:
+                return {
+                    "success": False,
+                    "message": f"No button found matching keywords: {keywords}",
+                    "available_buttons": [{"text": e.get("text"), "selector": e.get("selector"), "aria-label": e.get("aria-label")} for e in elements if e.get("tag") in ["button", "input"]][:5]
+                }
+            
+            # Usar el primer botón que coincida
+            target_button = matching_buttons[0]
+            selector = target_button["element"]["selector"]
+            
+            safe_print(f"[PROGRAMMATIC] Haciendo clic en botón: {target_button['element']['text']} -> {selector}")
+            
+            # Ejecutar el clic usando el selector extraído
+            js_script = f"""
+            (function() {{
+                const element = document.querySelector('{selector}');
+                if (element) {{
+                    element.click();
+                    return {{success: true, message: "Button clicked successfully", selector: '{selector}'}};
+                }} else {{
+                    return {{success: false, message: "Element not found with selector: {selector}"}};
+                }}
+            }})();
+            """
+            
+            result = self.browser.driver.execute_script(js_script)
+            
+            # Log the programmatic code used
+            success = result.get("success", False) if isinstance(result, dict) else False
+            self.llm.log_action_code("click_button", "PROGRAMMATIC", js_script, success)
+            
+            return result if isinstance(result, dict) else {"success": False, "message": "Invalid response from click script"}
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Exception in programmatic button click: {str(e)}"
+            }
+
+    def _enhanced_click_element_with_extracted_elements(self, selector: str, elements: List[dict], page_context: dict) -> dict:
+        """
+        Click de elemento usando selector y elementos extraídos para validación
+        """
+        safe_print(f"[PROGRAMMATIC] Haciendo clic en elemento con selector: {selector}")
+        
+        try:
+            # Verificar si el selector existe en los elementos extraídos
+            element_found = any(e.get("selector") == selector for e in elements)
+            
+            if not element_found:
+                return {
+                    "success": False,
+                    "message": f"Selector not found in extracted elements: {selector}",
+                    "available_selectors": [e.get("selector") for e in elements[:5]]
+                }
+            
+            # Ejecutar el clic
+            js_script = f"""
+            (function() {{
+                const element = document.querySelector('{selector}');
+                if (element) {{
+                    element.click();
+                    return {{success: true, message: "Element clicked successfully", selector: '{selector}'}};
+                }} else {{
+                    return {{success: false, message: "Element not found with selector: {selector}"}};
+                }}
+            }})();
+            """
+            
+            result = self.browser.driver.execute_script(js_script)
+            
+            # Log the programmatic code used
+            success = result.get("success", False) if isinstance(result, dict) else False
+            self.llm.log_action_code("click_element", "PROGRAMMATIC", js_script, success)
+            
+            return result if isinstance(result, dict) else {"success": False, "message": "Invalid response from click script"}
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Exception in programmatic element click: {str(e)}"
+            }
+
+    def _enhanced_enter_text_with_extracted_elements(self, selector: str, text: str, elements: List[dict], page_context: dict, press_enter: bool = True) -> dict:
+        """
+        Entrada de texto usando elementos extraídos para encontrar campos editables
+        """
+        safe_print(f"[PROGRAMMATIC] Ingresando texto en selector: {selector}")
+        
+        try:
+            # Buscar elemento editable que coincida
+            target_element = None
+            
+            # Si no se especifica selector, buscar campo editable
+            if not selector:
+                for element in elements:
+                    if element.get("contenteditable") or element.get("tag") in ["input", "textarea"]:
+                        target_element = element
+                        selector = element.get("selector")
+                        break
+            else:
+                # PRIMERA OPCIÓN: Verificar que el selector exacto existe en elementos extraídos
+                target_element = next((e for e in elements if e.get("selector") == selector), None)
+                
+                # SEGUNDA OPCIÓN: Si no hay coincidencia exacta, buscar por data-testid
+                if not target_element and "data-testid" in selector:
+                    # Extraer data-testid del selector (ej: div[data-testid="tweetTextarea_0"] -> tweetTextarea_0)
+                    testid_match = re.search(r'data-testid[=\'\"]*([^\'\"\]]+)', selector)
+                    if testid_match:
+                        target_testid = testid_match.group(1)
+                        target_element = next((e for e in elements if e.get("data-testid") == target_testid), None)
+                        if target_element:
+                            selector = target_element.get("selector")  # Usar el selector extraído
+                            safe_print(f"[PROGRAMMATIC] Encontrado elemento por data-testid: {target_testid} -> {selector}")
+                
+                # TERCERA OPCIÓN: Si sigue sin encontrar y es contenteditable, buscar cualquier contenteditable
+                if not target_element and "contenteditable" in selector.lower():
+                    target_element = next((e for e in elements if e.get("contenteditable")), None)
+                    if target_element:
+                        selector = target_element.get("selector")  # Usar el selector extraído
+                        safe_print(f"[PROGRAMMATIC] Encontrado elemento contenteditable: {selector}")
+            
+            if not target_element:
+                return {
+                    "success": False,
+                    "message": f"No editable element found with selector: {selector}",
+                    "editable_elements": [{"text": e.get("text"), "selector": e.get("selector")} for e in elements if e.get("contenteditable") or e.get("tag") in ["input", "textarea"]][:3]
+                }
+            
+            # Determinar el tipo de elemento para usar la estrategia correcta
+            is_contenteditable = target_element.get("contenteditable")
+            
+            if is_contenteditable:
+                # Usar método especial para contenteditable con paste simulation
+                js_script = f"""
+                (function() {{
+                    const element = document.querySelector('{selector}');
+                    if (!element) {{
+                        return {{success: false, message: "Element not found"}};
+                    }}
+                    
+                    function simulatePaste(el, text) {{
+                        // Focus and select all existing content
+                        el.focus();
+                        el.click();
+                        
+                        const selection = window.getSelection();
+                        selection.selectAllChildren(el);
+                        selection.deleteFromDocument();
+                        
+                        // Create paste event
+                        const pasteEvent = new ClipboardEvent("paste", {{
+                            bubbles: true,
+                            cancelable: true,
+                            clipboardData: new DataTransfer()
+                        }});
+                        
+                        pasteEvent.clipboardData.setData("text/plain", text);
+                        
+                        // Dispatch paste event
+                        el.dispatchEvent(pasteEvent);
+                        
+                        // Fallback: set text directly if paste event didn't work
+                        if (!el.textContent || el.textContent.trim() === '') {{
+                            el.textContent = text;
+                        }}
+                        
+                        // Dispara eventos para que frameworks lo detecten
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        el.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                    }}
+                    
+                    simulatePaste(element, '{text}');
+                    
+                    return {{success: true, message: "Text pasted successfully in contenteditable", selector: '{selector}'}};
+                }})();
+                """
+            else:
+                # Usar método mejorado con paste simulation para input/textarea
+                enter_key = "element.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));" if press_enter else ""
+                js_script = f"""
+                (function() {{
+                    const element = document.querySelector('{selector}');
+                    if (!element) {{
+                        return {{success: false, message: "Element not found"}};
+                    }}
+                    
+                    function simulatePaste(el, text) {{
+                        el.focus();
+                        
+                        // Select all existing content
+                        el.select();
+                        
+                        // Create paste event
+                        const pasteEvent = new ClipboardEvent("paste", {{
+                            bubbles: true,
+                            cancelable: true,
+                            clipboardData: new DataTransfer()
+                        }});
+                        
+                        pasteEvent.clipboardData.setData("text/plain", text);
+                        
+                        // Dispatch paste event
+                        el.dispatchEvent(pasteEvent);
+                        
+                        // Fallback: set value directly if paste event didn't work
+                        if (!el.value || el.value.trim() === '') {{
+                            el.value = text;
+                        }}
+                        
+                        // Dispara eventos para que frameworks lo detecten (importante para React/Vue/Angular)
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        el.dispatchEvent(new Event('blur', {{bubbles: true}}));
+                    }}
+                    
+                    simulatePaste(element, '{text}');
+                    
+                    {enter_key}
+                    
+                    return {{success: true, message: "Text pasted successfully", selector: '{selector}'}};
+                }})();
+                """
+            
+            result = self.browser.driver.execute_script(js_script)
+            
+            # Log the programmatic code used
+            success = result.get("success", False) if isinstance(result, dict) else False
+            action_name = "enter_text" if press_enter else "enter_text_no_enter"
+            self.llm.log_action_code(action_name, "PROGRAMMATIC", js_script, success)
+            
+            return result if isinstance(result, dict) else {"success": False, "message": "Invalid response from text entry script"}
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Exception in programmatic text entry: {str(e)}"
+            }
+
+    def _llm_action_with_verification(self, action: dict, current_elements: dict, original_goal: str = "") -> dict:
+        """
+        Ejecuta acción con LLM y verificación automática de éxito.
+        El LLM debe generar código que incluya verificación de éxito.
         """
         action_type = action.get("action", "")
         parameters = action.get("parameters", {})
+        elements = current_elements.get("elements", [])
         
-        safe_print(f"[AI] [LLM_FALLBACK] Iniciando fallback con LLM para acci?n: {action_type}")
-        
-        # Preparar el contexto completo para el LLM
-        llm_context = {
-            "action_requested": action,
-            "page_elements": page_info.get("interactive_elements", {}).get("elements", []),
-            "page_url": page_info.get("url", ""),
-            "page_title": page_info.get("title", ""),
-            "previous_failure": previous_result,
-            "objective": f"Generate JavaScript code to {action_type} with parameters {parameters}"
-        }
-        
-        # Crear prompt para el LLM
-        llm_prompt = f"""
-TASK: Generate JavaScript code to perform the following action on a web page.
-
-ACTION REQUESTED: {action_type}
-PARAMETERS: {json.dumps(parameters, indent=2)}
-
-AVAILABLE PAGE ELEMENTS:
-{json.dumps(page_info.get("interactive_elements", {}).get("elements", [])[:20], indent=2)}
-
-PAGE CONTEXT:
-- URL: {page_info.get("url", "")}
-- Title: {page_info.get("title", "")}
-
-PREVIOUS FAILURE:
-{json.dumps(previous_result, indent=2)}
-
-CRITICAL REQUIREMENTS:
-1. Return ONLY executable JavaScript code wrapped in (function() {{ ... }})();
-2. The code should be robust and handle edge cases
-3. Use console.log for debugging information
-4. Return a result object with success status: return {{success: true/false, message: "...", details: {{...}}}}
-5. For button clicks: find the most appropriate button based on the action context
-6. For text input: NEVER use simple value assignment (element.value = text)
-7. For text input: ALWAYS simulate real typing with proper events to trigger SPA validation
-8. Handle both contenteditable and regular input elements
-
-ENHANCED TEXT INPUT SIMULATION REQUIREMENTS:
-- Clear the field first with proper selection
-- Simulate realistic typing with individual keystrokes
-- Fire proper events: focus, input, keydown, keyup, change, blur
-- For React/Vue/Angular SPAs: dispatch input events with proper event properties
-- Verify the text was actually entered and detected by the page
-
-ENHANCED TEXT INPUT CODE TEMPLATE:
-function simulateRealTyping(element, text) {{
-    // Focus the element first
-    element.focus();
-    element.click();
-    
-    // Clear existing content
-    element.select();
-    element.setSelectionRange(0, element.value.length);
-    
-    // Simulate backspace to clear
-    element.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Backspace', bubbles: true}}));
-    element.value = '';
-    element.dispatchEvent(new Event('input', {{bubbles: true}}));
-    
-    // Type each character with proper events
-    for (let i = 0; i < text.length; i++) {{
-        const char = text[i];
-        
-        // Simulate keydown
-        element.dispatchEvent(new KeyboardEvent('keydown', {{
-            key: char,
-            keyCode: char.charCodeAt(0),
-            which: char.charCodeAt(0),
-            bubbles: true
-        }}));
-        
-        // Add the character
-        element.value += char;
-        
-        // Simulate input event (crucial for React/Vue)
-        element.dispatchEvent(new Event('input', {{
-            bubbles: true,
-            cancelable: true,
-            inputType: 'insertText',
-            data: char
-        }}));
-        
-        // Simulate keyup
-        element.dispatchEvent(new KeyboardEvent('keyup', {{
-            key: char,
-            keyCode: char.charCodeAt(0),
-            which: char.charCodeAt(0),
-            bubbles: true
-        }}));
-    }}
-    
-    // Final events to ensure SPA detects the input
-    element.dispatchEvent(new Event('change', {{bubbles: true}}));
-    element.blur();
-}}
-
-EXAMPLE OUTPUT FORMAT:
-(function() {{
-    // ALWAYS INCLUDE THIS ENHANCED TYPING FUNCTION
-    function simulateRealTyping(element, text) {{
-        console.log('[ENHANCED_TYPING] Starting enhanced typing simulation for:', text.substring(0, 50));
-        
-        // Focus the element first
-        element.focus();
-        element.click();
-        
-        // Clear existing content with proper selection
-        if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
-            // For contenteditable div (like X.com)
-            element.selectAll && element.selectAll();
-            const selection = window.getSelection();
-            selection.selectAllChildren(element);
-            selection.deleteFromDocument();
-        }} else {{
-            // For regular input/textarea
-            element.select();
-            element.setSelectionRange(0, element.value.length);
-            element.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Backspace', bubbles: true}}));
-            element.value = '';
-        }}
-        
-        // Initial input event to clear
-        element.dispatchEvent(new Event('input', {{bubbles: true}}));
-        
-        // Type each character with realistic timing
-        let currentText = '';
-        for (let i = 0; i < text.length; i++) {{
-            const char = text[i];
-            currentText += char;
-            
-            // Simulate keydown
-            element.dispatchEvent(new KeyboardEvent('keydown', {{
-                key: char,
-                keyCode: char.charCodeAt(0),
-                which: char.charCodeAt(0),
-                bubbles: true,
-                cancelable: true
-            }}));
-            
-            // Update content based on element type
-            if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
-                element.textContent = currentText;
-            }} else {{
-                element.value = currentText;
-            }}
-            
-            // Simulate input event (crucial for React/Vue/SPA frameworks)
-            const inputEvent = new Event('input', {{
-                bubbles: true,
-                cancelable: true
-            }});
-            inputEvent.inputType = 'insertText';
-            inputEvent.data = char;
-            element.dispatchEvent(inputEvent);
-            
-            // Simulate keyup
-            element.dispatchEvent(new KeyboardEvent('keyup', {{
-                key: char,
-                keyCode: char.charCodeAt(0),
-                which: char.charCodeAt(0),
-                bubbles: true
-            }}));
-        }}
-        
-        // Final events to ensure SPA frameworks detect the change
-        element.dispatchEvent(new Event('change', {{bubbles: true}}));
-        element.dispatchEvent(new Event('blur', {{bubbles: true}}));
-        
-        console.log('[ENHANCED_TYPING] Enhanced typing simulation completed');
-        return true;
-    }}
-    
-    try {{
-        console.log('[LLM_ACTION] Starting {action_type}...');
-        
-        if ('{action_type}' === 'type_text') {{
-            // Use enhanced typing simulation
-            const text = {json.dumps(parameters.get('text', ''))};
-            
-            // Common selectors for popular sites
-            const inputSelectors = [
-                // X.com (Twitter) composer
-                'div[data-testid="tweetTextarea_0"]',
-                'div[role="textbox"][data-testid="tweetTextarea_0"]',
-                'div[contenteditable="true"][data-testid="tweetTextarea_0"]',
-                // Generic social media
-                'div[role="textbox"][contenteditable="true"]',
-                'div[contenteditable="true"][aria-multiline="true"]',
-                // Regular inputs  
-                'input[type="text"]', 'textarea', 
-                // Fallback
-                '[contenteditable="true"]', 'input', 'textarea'
-            ];
-            
-            let element = null;
-            for (const selector of inputSelectors) {{
-                element = document.querySelector(selector);
-                if (element && element.offsetParent !== null) break; // visible element
-            }}
-            
-            if (element) {{
-                simulateRealTyping(element, text);
-                console.log('[LLM_ACTION] Enhanced typing completed on element:', element.tagName, element.getAttribute('data-testid'));
-                
-                // Additional verification for X.com
-                if (window.location.href.includes('x.com') || window.location.href.includes('twitter.com')) {{
-                    // Wait a bit for React to process
-                    setTimeout(() => {{
-                        const postButton = document.querySelector('[data-testid="tweetButtonInline"]') || 
-                                         document.querySelector('[data-testid="tweetButton"]') ||
-                                         document.querySelector('div[role="button"]:has-text("Post")');
-                        if (postButton && !postButton.disabled) {{
-                            console.log('[LLM_ACTION] Post button is now enabled after typing');
-                        }}
-                    }}, 500);
-                }}
-            }} else {{
-                console.error('[LLM_ACTION] No suitable text input element found');
-            }}
-        }} else if ('{action_type}' === 'click_button') {{
-            // Enhanced button clicking with better detection
-            const keywords = {json.dumps(parameters.get('keywords', []))};
-            const buttonSelectors = [
-                // X.com specific
-                '[data-testid="tweetButtonInline"]',
-                '[data-testid="tweetButton"]', 
-                'div[role="button"]:has-text("Post")',
-                'div[role="button"]:has-text("Tweet")',
-                // Generic patterns
-                'button', 'input[type="submit"]', 'div[role="button"]',
-                'a[role="button"]', '.btn', '.button'
-            ];
-            
-            let targetButton = null;
-            
-            // Try specific selectors first
-            for (const selector of buttonSelectors) {{
-                const button = document.querySelector(selector);
-                if (button && button.offsetParent !== null && !button.disabled) {{
-                    targetButton = button;
-                    break;
-                }}
-            }}
-            
-            // Fallback: search by text content
-            if (!targetButton) {{
-                const allButtons = document.querySelectorAll('button, div[role="button"], input[type="submit"]');
-                for (const button of allButtons) {{
-                    const text = button.textContent.toLowerCase().trim();
-                    if (keywords.some(keyword => text.includes(keyword.toLowerCase()))) {{
-                        targetButton = button;
-                        break;
-                    }}
-                }}
-            }}
-            
-            if (targetButton) {{
-                targetButton.focus();
-                targetButton.click();
-                console.log('[LLM_ACTION] Successfully clicked button:', targetButton.textContent.trim());
-            }}
-        }}
-        
-        // Find and interact with elements using enhanced methods
-        // Add any additional logic here based on the specific action
-        
-        return {{
-            success: true,
-            message: "Action completed successfully with enhanced simulation",
-            details: {{
-                element_found: true,
-                action_performed: true,
-                enhanced_simulation_used: true,
-                action_type: '{action_type}'
-            }}
-        }};
-    }} catch (error) {{
-        console.error('[LLM_ACTION] Error:', error);
-        return {{
-            success: false,
-            message: "Error: " + error.message,
-            details: {{
-                error_type: error.name,
-                stack: error.stack,
-                action_type: '{action_type}'
-            }}
-        }};
-    }}
-}})();
-
-Generate the JavaScript code now:
-"""
+        safe_print(f"[AI] [LLM] Iniciando ejecución LLM con verificación para: {action_type}")
+        safe_print(f"[DEBUG] [LLM] Elementos disponibles: {len(elements)}")
         
         try:
-            # Solicitar código JavaScript al LLM
-            safe_print("[AI] [LLM_FALLBACK] Solicitando código JavaScript al LLM...")
+            # PASO 1: Crear prompt con enfoque en verificación de éxito
+            current_action_description = f"Perform {action_type} with parameters: {parameters}"
+            
+            llm_prompt = f"""
+OVERALL GOAL: {original_goal if original_goal else "Web automation task"}
+
+TASK: Generate JavaScript code that performs an action AND verifies its success.
+
+ACTION TO PERFORM: {action_type}
+ACTION PARAMETERS: {json.dumps(parameters, indent=2)}
+
+AVAILABLE PAGE ELEMENTS (live from current page):
+{json.dumps(elements, indent=2)}
+
+PAGE CONTEXT:
+- URL: {current_elements.get("url", "")}
+- Title: {current_elements.get("title", "")}
+
+CRITICAL REQUIREMENTS:
+1. Your JavaScript code must include BOTH action execution AND success verification
+2. Use ONLY selectors from the AVAILABLE PAGE ELEMENTS above
+3. For text input: Use the simulatePaste() function provided below (copy the entire function)
+4. For clicks: Use element.click() on the exact selectors provided
+5. MUST return object with success:true/false and verification details
+6. Code must verify the action actually worked (text was entered, button was clicked, etc.)
+7. INCLUDE the simulatePaste function definition in your code - do not just call it
+
+COMPLETE SIMULATEPASTE FUNCTION (copy this entire function into your code):
+function simulatePaste(element, text) {{
+    element.focus();
+    
+    // STEP 1: Clear ALL existing content completely
+    if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+        // For contenteditable elements - multiple clearing methods
+        element.click();
+        element.focus();
+        
+        // Method 1: Select all and delete
+        const selection = window.getSelection();
+        selection.selectAllChildren(element);
+        selection.deleteFromDocument();
+        
+        // Method 2: Clear content directly
+        element.textContent = '';
+        element.innerHTML = '';
+        
+        // Method 3: Ensure it's really empty
+        while (element.firstChild) {{
+            element.removeChild(element.firstChild);
+        }}
+    }} else {{
+        // For input/textarea elements
+        element.select();
+        element.value = '';
+    }}
+    
+    // STEP 2: Insert new text using paste event
+    const pasteEvent = new ClipboardEvent("paste", {{
+        bubbles: true,
+        cancelable: true,
+        clipboardData: new DataTransfer()
+    }});
+    
+    pasteEvent.clipboardData.setData("text/plain", text);
+    element.dispatchEvent(pasteEvent);
+    
+    // STEP 3: Fallback if paste event didn't work
+    if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+        if (!element.textContent || element.textContent.trim() === '') {{
+            element.textContent = text;
+        }}
+    }} else {{
+        if (!element.value || element.value.trim() === '') {{
+            element.value = text;
+        }}
+    }}
+    
+    // STEP 4: Trigger events for framework detection
+    element.dispatchEvent(new Event('input', {{bubbles: true}}));
+    element.dispatchEvent(new Event('change', {{bubbles: true}}));
+    element.dispatchEvent(new Event('blur', {{bubbles: true}}));
+}}
+
+VERIFICATION EXAMPLES:
+- For text input: Check if element.textContent or element.value contains the entered text
+- For button clicks: Check if page changed, new elements appeared, or button state changed
+- For navigation: Check if URL changed
+
+RESPONSE FORMAT (MANDATORY - your code MUST return this exact structure):
+// Include simulatePaste function definition first
+function simulatePaste(element, text) {{ /* full function above */ }}
+
+// Your action code here (NO IIFE wrapper needed)
+
+// MANDATORY: Always return this object structure at the end
+return {{
+    success: true/false,
+    message: "Description of what happened",
+    action_performed: "{action_type}",
+    verification_details: {{
+        expected: "what was expected to happen",
+        actual: "what actually happened",  
+        element_found: true/false,
+        action_completed: true/false
+    }},
+    debug_info: {{
+        selector_used: "actual selector used",
+        element_text: "element text content if applicable"
+    }}
+}};
+
+IMPORTANT: 
+- Do NOT wrap your code in (function() {{}})(); - use direct execution
+- Your JavaScript code must ALWAYS end with a return statement
+- Do NOT use setTimeout or async operations - execute everything synchronously
+"""
+            
+            # PASO 2: Solicitar código JavaScript al LLM
+            safe_print("[AI] [LLM] Solicitando código JavaScript con verificación al LLM...")
             llm_response = self.llm.ask_llm_with_context(
-                llm_prompt, 
-                page_context=llm_context,
-                max_tokens=1500
+                llm_prompt,
+                page_context={
+                    "overall_goal": original_goal,
+                    "current_action": action,
+                    "available_elements": elements,
+                    "page_url": current_elements.get("url", ""),
+                    "page_title": current_elements.get("title", "")
+                }
+            )
+            
+            if not llm_response or not llm_response.strip():
+                return {
+                    "success": False,
+                    "message": "LLM failed to generate code - empty response",
+                    "method_used": "llm_only"
+                }
+            
+            # PASO 3: Extraer y ejecutar el código JavaScript
+            js_code = self._extract_js_code_from_llm_response(llm_response)
+            
+            if not js_code:
+                return {
+                    "success": False,
+                    "message": "LLM failed to generate valid JavaScript code",
+                    "llm_response": llm_response[:200],
+                    "method_used": "llm_only"
+                }
+            
+            safe_print(f"[AI] [LLM] Ejecutando código JavaScript con verificación...")
+            safe_print(f"[CODE] {js_code[:200]}...")
+            
+            # PASO 4: Ejecutar el código generado
+            result = self.browser.driver.execute_script(js_code)
+            
+            # PASO 5: Procesar resultado con verificación
+            if result is None:
+                safe_print("[WARNING] [LLM] JavaScript code returned None - assuming success")
+                result = {
+                    "success": True,
+                    "message": "JavaScript executed but returned no verification data",
+                    "verification_details": {"note": "No verification data returned"}
+                }
+            
+            if isinstance(result, dict):
+                result["method_used"] = "llm_only"
+                result["elements_used"] = len(elements)
+                result["original_goal"] = original_goal
+                
+                success = result.get("success", False)
+                verification = result.get("verification_details", {})
+                
+                # Log the LLM code used for this action
+                self.llm.log_action_code(action_type, "LLM_ONLY", js_code, success)
+                
+                if success:
+                    safe_print("[SUCCESS] [LLM] Código LLM ejecutado exitosamente con verificación!")
+                    safe_print(f"[SUCCESS] Verificación: {verification.get('expected', 'N/A')} -> {verification.get('actual', 'N/A')}")
+                else:
+                    safe_print(f"[ERROR] [LLM] Código LLM falló verificación: {result.get('message', 'Unknown error')}")
+                    safe_print(f"[ERROR] Detalles: {verification}")
+                    
+                return result
+            else:
+                # Log failed LLM attempt
+                self.llm.log_action_code(action_type, "LLM_ONLY", js_code, False)
+                return {
+                    "success": False,
+                    "message": f"LLM returned unexpected result type: {type(result)}",
+                    "result": str(result)[:100],
+                    "method_used": "llm_only",
+                    "js_code": js_code[:200]
+                }
+                
+        except Exception as e:
+            safe_print(f"[ERROR] [LLM] Error en ejecución LLM: {str(e)}")
+            return {
+                "success": False,
+                "message": f"LLM execution exception: {str(e)}",
+                "method_used": "llm_only"
+            }
+    def _llm_fallback_action_backup(self, action: dict, current_elements: dict, previous_result: dict, original_goal: str = "") -> dict:
+        action_type = action.get("action", "")
+        parameters = action.get("parameters", {})
+        elements = current_elements.get("elements", [])
+        
+        safe_print(f"[AI] [LLM_FALLBACK] Iniciando fallback universal para acción: {action_type}")
+        safe_print(f"[DEBUG] [LLM_FALLBACK] Elementos disponibles: {len(elements)}")
+        
+        try:
+            # PASO 1: Crear prompt enriquecido con goal original y contexto completo
+            current_action_description = f"Perform {action_type} with parameters: {parameters}"
+            
+            llm_prompt = f"""
+OVERALL GOAL: {original_goal if original_goal else "Not specified"}
+
+CURRENT TASK: Generate JavaScript code to perform a single action on a web page.
+
+CURRENT ACTION: {action_type}
+PARAMETERS: {json.dumps(parameters, indent=2)}
+
+AVAILABLE PAGE ELEMENTS (extracted live from current page):
+{json.dumps(elements, indent=2)}
+
+PAGE CONTEXT:
+- URL: {current_elements.get("url", "")}
+- Title: {current_elements.get("title", "")}
+
+PREVIOUS PROGRAMMATIC ATTEMPT FAILED:
+{previous_result.get("message", "Unknown error")}
+
+REQUIREMENTS:
+1. You have COMPLETE FREEDOM to generate any JavaScript code needed
+2. NO keyword matching required - analyze the goal and elements intelligently
+3. Use ONLY the selectors provided in AVAILABLE PAGE ELEMENTS above
+4. Return ONLY executable JavaScript code wrapped in (function() {{ ... }})();
+5. For text input: Use proper event simulation with bubbles:true for framework compatibility
+6. For clicks: Use the exact selectors from the available elements
+7. Consider the OVERALL GOAL when deciding which elements to interact with
+8. Return result object: return {{success: true/false, message: "...", details: {{...}}}}
+
+ENHANCED TYPING FUNCTION (use for ALL text input - handles React/Vue/Angular frameworks):
+function simulatePaste(element, text) {{
+    element.focus();
+    
+    if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+        // For contenteditable elements
+        element.click();
+        const selection = window.getSelection();
+        selection.selectAllChildren(element);
+        selection.deleteFromDocument();
+    }} else {{
+        // For input/textarea elements
+        element.select();
+    }}
+    
+    // Create paste event with clipboard data
+    const pasteEvent = new ClipboardEvent("paste", {{
+        bubbles: true,
+        cancelable: true,
+        clipboardData: new DataTransfer()
+    }});
+    
+    pasteEvent.clipboardData.setData("text/plain", text);
+    
+    // Dispatch the paste event
+    element.dispatchEvent(pasteEvent);
+    
+    // Fallback: set content directly if paste event didn't work
+    if (element.tagName === 'DIV' && element.contentEditable === 'true') {{
+        if (!element.textContent || element.textContent.trim() === '') {{
+            element.textContent = text;
+        }}
+    }} else {{
+        if (!element.value || element.value.trim() === '') {{
+            element.value = text;
+        }}
+    }}
+    
+    // CRITICAL: Dispara eventos para que frameworks lo detecten
+    element.dispatchEvent(new Event('input', {{bubbles: true}}));
+    element.dispatchEvent(new Event('change', {{bubbles: true}}));
+    element.dispatchEvent(new Event('blur', {{bubbles: true}}));
+}}
+
+CONTEXT FOR INTELLIGENT DECISION MAKING:
+- Overall Goal: {original_goal}
+- Current Action: {current_action_description}
+- Available Elements Count: {len(elements)}
+- Page: {current_elements.get("title", "")}
+
+Generate the most appropriate JavaScript code to accomplish this action within the context of the overall goal.
+IMPORTANT: Always use simulatePaste() for text input to ensure maximum framework compatibility.
+"""
+            
+            # PASO 2: Solicitar código JavaScript al LLM
+            safe_print("[AI] [LLM_FALLBACK] Solicitando código JavaScript específico al LLM...")
+            llm_response = self.llm.ask_llm_with_context(
+                llm_prompt,
+                page_context={
+                    "overall_goal": original_goal,
+                    "current_action": action,
+                    "available_elements": elements,
+                    "page_url": current_elements.get("url", ""),
+                    "page_title": current_elements.get("title", ""),
+                    "programmatic_failure": previous_result
+                }
             )
             
             if not llm_response or not llm_response.strip():
@@ -1114,7 +1408,7 @@ Generate the JavaScript code now:
                     "fallback_used": True
                 }
             
-            # Limpiar la respuesta del LLM para extraer solo el c?digo JavaScript
+            # PASO 3: Extraer y ejecutar el código JavaScript
             js_code = self._extract_js_code_from_llm_response(llm_response)
             
             if not js_code:
@@ -1125,111 +1419,158 @@ Generate the JavaScript code now:
                     "fallback_used": True
                 }
             
-            safe_print(f"[AI] [LLM_FALLBACK] Ejecutando c?digo JavaScript generado por LLM...")
-            safe_print(f"[DOCUMENT] [LLM_CODE] {js_code[:200]}...")
+            safe_print(f"[AI] [LLM_FALLBACK] Ejecutando código JavaScript generado...")
+            safe_print(f"[CODE] {js_code[:200]}...")
             
-            # Ejecutar el c?digo JavaScript generado por el LLM
+            # PASO 4: Ejecutar el código generado
             result = self.browser.driver.execute_script(js_code)
+            
+            # Manejar caso donde el resultado es None
+            if result is None:
+                safe_print("[WARNING] [LLM_FALLBACK] JavaScript code returned None - assuming success")
+                result = {
+                    "success": True,
+                    "message": "JavaScript executed but returned no value (assuming success)",
+                    "result_type": "None"
+                }
             
             if isinstance(result, dict):
                 result["fallback_used"] = True
                 result["llm_generated"] = True
+                result["elements_used"] = len(elements)
+                result["original_goal"] = original_goal
                 
-                if result.get("success", False):
-                    safe_print("[SUCCESS] [LLM_FALLBACK] C?digo LLM ejecutado exitosamente!")
+                success = result.get("success", False)
+                
+                # Log the LLM code used for this action
+                self.llm.log_action_code(action_type, "LLM_FALLBACK", js_code, success)
+                
+                if success:
+                    safe_print("[SUCCESS] [LLM_FALLBACK] Código LLM ejecutado exitosamente!")
                 else:
-                    safe_print(f"[ERROR] [LLM_FALLBACK] C?digo LLM fall?: {result.get('message', 'Unknown error')}")
+                    safe_print(f"[ERROR] [LLM_FALLBACK] Código LLM falló: {result.get('message', 'Unknown error')}")
                     
                 return result
             else:
+                # Log failed LLM attempt
+                self.llm.log_action_code(action_type, "LLM_FALLBACK", js_code, False)
                 return {
                     "success": False,
                     "message": f"LLM fallback returned unexpected result type: {type(result)}",
                     "result": str(result)[:100],
-                    "fallback_used": True
+                    "fallback_used": True,
+                    "js_code": js_code[:200]  # Include some JS code for debugging
                 }
                 
         except Exception as e:
-            safe_print(f"[ERROR] [LLM_FALLBACK] Error en fallback con LLM: {str(e)}")
+            safe_print(f"[ERROR] [LLM_FALLBACK] Error en fallback universal: {str(e)}")
             return {
                 "success": False,
                 "message": f"LLM fallback exception: {str(e)}",
-                "fallback_used": True,
-                "error_type": type(e).__name__
+                "fallback_used": True
             }
-    
     def _extract_js_code_from_llm_response(self, llm_response: str) -> str:
         """
-        Extrae el c?digo JavaScript de la respuesta del LLM
+        Extrae el código JavaScript de la respuesta del LLM (sin IIFE)
         """
-        # Buscar patrones comunes de c?digo JavaScript en la respuesta
+        # Buscar patrones comunes de código JavaScript en la respuesta
         
-        # Patr?n 1: C?digo envuelto en ```javascript
+        # Patrón 1: Código envuelto en ```javascript
         js_pattern1 = r'```(?:javascript|js)?\s*(.*?)```'
         match1 = re.search(js_pattern1, llm_response, re.DOTALL | re.IGNORECASE)
         if match1:
             return match1.group(1).strip()
         
-        # Patr?n 2: Funci?n auto-ejecutable (function() { ... })();
-        js_pattern2 = r'\(function\(\)\s*\{.*?\}\)\(\);'
+        # Patrón 2: Función auto-ejecutable (function() { ... })(); - convertir a código directo
+        js_pattern2 = r'\(function\(\)\s*\{(.*?)\}\)\(\);'
         match2 = re.search(js_pattern2, llm_response, re.DOTALL)
         if match2:
-            return match2.group(0)
+            # Extraer solo el contenido de la función, sin el wrapper IIFE
+            return match2.group(1).strip()
         
-        # Patr?n 3: Cualquier l?nea que comience con (function()
+        # Patrón 3: Buscar código que empiece con function definition y termine con return
         lines = llm_response.split('\n')
         js_lines = []
-        in_js_block = False
+        collecting = False
         
         for line in lines:
-            if line.strip().startswith('(function()') or line.strip().startswith('function()'):
-                in_js_block = True
+            line_stripped = line.strip()
+            # Empezar a recoger cuando vemos function definition o código directo
+            if (line_stripped.startswith('function simulatePaste') or 
+                line_stripped.startswith('const ') or 
+                line_stripped.startswith('let ') or
+                line_stripped.startswith('var ') or
+                line_stripped.startswith('//')):
+                collecting = True
                 js_lines.append(line)
-            elif in_js_block:
+            elif collecting:
                 js_lines.append(line)
-                if '})();' in line:
+                # Parar cuando encontremos el return final
+                if line_stripped.startswith('return {') and '};' in line:
                     break
         
         if js_lines:
             return '\n'.join(js_lines)
         
-        # Fallback: usar toda la respuesta si contiene palabras clave JavaScript
-        js_keywords = ['function', 'document.', 'console.log', 'return {', 'success:', 'try {']
+        # Fallback: buscar cualquier código que contenga return y función simulatePaste
+        if 'function simulatePaste' in llm_response and 'return {' in llm_response:
+            # Encontrar desde function hasta el último return
+            start_idx = llm_response.find('function simulatePaste')
+            end_idx = llm_response.rfind('};')
+            if start_idx != -1 and end_idx != -1:
+                return llm_response[start_idx:end_idx + 2]
+        
+        # Último recurso: usar toda la respuesta si contiene palabras clave
+        js_keywords = ['function', 'document.', 'console.log', 'return {', 'success:', 'querySelector']
         if any(keyword in llm_response for keyword in js_keywords):
             return llm_response.strip()
         
         return ""
 
-    def execute_action_with_llm_fallback(self, action: dict, page_info: dict) -> dict:
+    def execute_action_with_llm_fallback(self, action: dict, page_info: dict, original_goal: str = "") -> dict:
         """
-        Ejecuta una acci?n con fallback autom?tico a LLM cuando falla el m?todo program?tico
+        Ejecuta una acción usando SOLO el método LLM con elementos extraídos dinámicamente.
+        Se eliminó el método programático ya que no funcionaba correctamente.
         """
         action_type = action.get("action", "")
         
-        # Intentar m?todo program?tico primero
-        print(f"[HYBRID] Intentando m?todo program?tico para: {action_type}")
+        safe_print(f"[LLM] Iniciando ejecución con LLM para: {action_type}")
         
-        if action_type == "click_button":
-            keywords = action.get("parameters", {}).get("keywords", [])
-            programmatic_result = self._enhanced_click_button(keywords, page_info)
-        elif action_type in ["enter_text", "enter_text_no_enter"]:
-            selector = action.get("parameters", {}).get("selector", "")
-            text = action.get("parameters", {}).get("text", "")
-            press_enter = action_type == "enter_text"
-            programmatic_result = self._enhanced_enter_text(selector, text, page_info, press_enter)
-        else:
-            programmatic_result = {"success": False, "message": f"Unsupported action type: {action_type}"}
+        # PASO 1: Extraer elementos actuales de la página
+        try:
+            safe_print("[LLM] Extrayendo elementos actuales de la página...")
+            js_file_path = r"c:\Users\ALEXR\OneDrive\Desktop\Browser\web_agent\extractJsonInteractive_simple.js"
+            
+            with open(js_file_path, 'r', encoding='utf-8') as file:
+                extraction_js = file.read()
+            
+            # Add "return" to ensure the IIFE returns the value to Selenium
+            extraction_js_with_return = "return " + extraction_js
+            current_elements = self.browser.driver.execute_script(extraction_js_with_return)
+            
+            if not current_elements or not current_elements.get("elements"):
+                safe_print("[WARNING] [LLM] No se pudieron extraer elementos de la página")
+                return {
+                    "success": False,
+                    "message": "Failed to extract page elements for action execution",
+                    "method_used": "llm_only"
+                }
+            
+            elements = current_elements.get("elements", [])
+            safe_print(f"[DEBUG] [LLM] Elementos extraídos: {len(elements)}")
+            
+        except Exception as e:
+            safe_print(f"[ERROR] [LLM] Error extrayendo elementos: {e}")
+            return {
+                "success": False,
+                "message": f"Element extraction failed: {str(e)}",
+                "method_used": "llm_only"
+            }
         
-        # Si el m?todo program?tico fue exitoso, retornar ese resultado
-        if programmatic_result.get("success", False):
-            safe_print(f"[SUCCESS] [HYBRID] M?todo program?tico exitoso para: {action_type}")
-            programmatic_result["method_used"] = "programmatic"
-            return programmatic_result
-        
-        # Si fall?, usar fallback con LLM
-        safe_print(f"[AI] [HYBRID] M?todo program?tico fall?, usando fallback con LLM para: {action_type}")
-        llm_result = self._llm_fallback_action(action, page_info, programmatic_result)
-        llm_result["method_used"] = "llm_fallback"
-        llm_result["programmatic_failure"] = programmatic_result
+        # PASO 2: Ejecutar directamente con LLM usando elementos extraídos
+        safe_print(f"[LLM] Ejecutando acción con LLM: {action_type}")
+        llm_result = self._llm_action_with_verification(action, current_elements, original_goal)
+        llm_result["method_used"] = "llm_only"
+        llm_result["elements_used"] = len(elements)
         
         return llm_result

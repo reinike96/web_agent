@@ -322,135 +322,149 @@ class BrowserController:
                 
                 print(f"Attempting to type text using enhanced simulation...")
                 
-                # Strategy 1: Advanced simulation for contenteditable elements (X.com, Facebook, etc.)
+                # Strategy 1: Advanced paste simulation for contenteditable elements (X.com, Facebook, etc.)
                 if element.get_attribute("contenteditable") == "true" or "contenteditable" in element.get_attribute("class"):
-                    print(f"Using advanced contenteditable strategy...")
+                    print(f"Using advanced paste simulation strategy for contenteditable...")
                     
                     # Step 1: Focus and prepare element
                     element.click()
                     time.sleep(0.3)
                     
-                    # Clear existing content with more reliable method
-                    self.driver.execute_script("arguments[0].textContent = '';", element)
-                    self.driver.execute_script("arguments[0].innerHTML = '';", element)
-                    time.sleep(0.2)
-                    
-                    # Step 2: Use JavaScript to simulate real user typing with all events
+                    # Step 2: Use JavaScript to simulate paste instead of typing
                     success = self.driver.execute_script("""
                         var element = arguments[0];
                         var text = arguments[1];
                         
-                        function simulateTyping(element, text) {
-                            // Focus element
+                        function simulatePaste(element, text) {
                             element.focus();
                             
-                            // Clear any existing content
-                            element.textContent = '';
-                            element.innerHTML = '';
-                            
-                            // Use safer text insertion without problematic keyboard events
-                            // This avoids triggering keyboard shortcuts while still being detected by frameworks
-                            
-                            // Method 1: Direct text insertion with proper events
-                            element.textContent = text;
-                            
-                            // Simulate input event (crucial for modern frameworks)
-                            let inputEvent = new InputEvent('input', {
-                                data: text,
-                                inputType: 'insertText',
-                                bubbles: true,
-                                cancelable: false,
-                                composed: true
-                            });
-                            element.dispatchEvent(inputEvent);
-                            
-                            // Simulate change event for traditional forms
-                            let changeEvent = new Event('change', {
-                                bubbles: true,
-                                cancelable: true
-                            });
-                            element.dispatchEvent(changeEvent);
-                            
-                            // Trigger blur and focus to ensure validation
-                            element.blur();
-                            setTimeout(() => element.focus(), 10);
-                            
-                            // React-specific handling
-                            if (element._valueTracker) {
-                                element._valueTracker.setValue(text);
+                            if (element.tagName === 'DIV' && element.contentEditable === 'true') {
+                                // For contenteditable elements - clear content first
+                                element.click();
+                                const selection = window.getSelection();
+                                selection.selectAllChildren(element);
+                                selection.deleteFromDocument();
+                            } else {
+                                // For input/textarea elements
+                                element.select();
                             }
                             
-                            // Vue.js specific handling
-                            if (element.__vue__) {
-                                element.__vue__.$forceUpdate();
+                            // Create paste event with clipboard data
+                            const pasteEvent = new ClipboardEvent("paste", {
+                                bubbles: true,
+                                cancelable: true,
+                                clipboardData: new DataTransfer()
+                            });
+                            
+                            pasteEvent.clipboardData.setData("text/plain", text);
+                            
+                            // Dispatch the paste event
+                            element.dispatchEvent(pasteEvent);
+                            
+                            // Fallback: set content directly if paste event didn't work
+                            if (element.tagName === 'DIV' && element.contentEditable === 'true') {
+                                if (!element.textContent || element.textContent.trim() === '') {
+                                    element.textContent = text;
+                                }
+                            } else {
+                                if (!element.value || element.value.trim() === '') {
+                                    element.value = text;
+                                }
                             }
                             
-                            return element.textContent === text || element.innerText === text;
+                            // CRITICAL: Dispara eventos para que frameworks lo detecten
+                            element.dispatchEvent(new Event('input', {bubbles: true}));
+                            element.dispatchEvent(new Event('change', {bubbles: true}));
+                            element.dispatchEvent(new Event('blur', {bubbles: true}));
+                            
+                            return element.textContent === text || element.innerText === text || element.value === text;
                         }
                         
-                        return simulateTyping(element, text);
+                        return simulatePaste(element, text);
                     """, element, text)
                     
                     if success:
-                        safe_print(f"[SUCCESS] Advanced typing simulation successful")
+                        safe_print(f"[SUCCESS] Paste simulation successful")
                     else:
-                        safe_print(f"[WARNING] Advanced simulation completed, verifying content...")
+                        safe_print(f"[WARNING] Paste simulation completed, verifying content...")
                     
                     # Additional verification and fallback
                     time.sleep(0.5)
                     current_content = element.get_attribute("textContent") or element.get_attribute("innerText") or ""
                     
                     if text not in current_content:
-                        safe_print(f"[PROCESSING] Fallback: Using safer JavaScript text insertion")
+                        safe_print(f"[PROCESSING] Fallback: Using direct text insertion")
                         self.driver.execute_script("""
                             var element = arguments[0];
                             var text = arguments[1];
                             
-                            // Safer fallback that doesn't trigger shortcuts
+                            // Direct text insertion fallback
                             element.textContent = text;
                             element.innerHTML = text;
                             
-                            // Trigger only essential events
-                            let inputEvent = new InputEvent('input', { 
-                                data: text, 
-                                inputType: 'insertText', 
-                                bubbles: true 
-                            });
-                            element.dispatchEvent(inputEvent);
-                            
-                            let changeEvent = new Event('change', { bubbles: true });
-                            element.dispatchEvent(changeEvent);
+                            // Trigger essential events
+                            element.dispatchEvent(new Event('input', {bubbles: true}));
+                            element.dispatchEvent(new Event('change', {bubbles: true}));
                         """, element, text)
                 
                 else:
-                    # Strategy 2: Enhanced method for regular inputs
-                    print(f"Using enhanced strategy for regular input element...")
+                    # Strategy 2: Paste simulation for regular inputs
+                    print(f"Using paste simulation strategy for regular input element...")
                     
                     # Focus element
                     element.click()
                     time.sleep(0.2)
                     
-                    # Clear and type with events
-                    element.clear()
-                    
-                    # Use JavaScript for better event handling on regular inputs too
-                    self.driver.execute_script("""
+                    # Use paste simulation for regular inputs too
+                    success = self.driver.execute_script("""
                         var element = arguments[0];
                         var text = arguments[1];
                         
-                        element.value = text;
-                        
-                        // Trigger events that frameworks listen for (excluding keyup to avoid shortcuts)
-                        ['input', 'change', 'blur', 'focus'].forEach(eventType => {
-                            let event = new Event(eventType, { bubbles: true, cancelable: true });
-                            element.dispatchEvent(event);
-                        });
-                        
-                        // React specific
-                        if (element._valueTracker) {
-                            element._valueTracker.setValue(text);
+                        function simulatePaste(element, text) {
+                            element.focus();
+                            
+                            // Select all existing content for replacement
+                            if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                                element.select();
+                            }
+                            
+                            // Create paste event with clipboard data
+                            const pasteEvent = new ClipboardEvent("paste", {
+                                bubbles: true,
+                                cancelable: true,
+                                clipboardData: new DataTransfer()
+                            });
+                            
+                            pasteEvent.clipboardData.setData("text/plain", text);
+                            
+                            // Dispatch the paste event
+                            element.dispatchEvent(pasteEvent);
+                            
+                            // Fallback: set value directly if paste event didn't work
+                            if (!element.value || element.value.trim() === '') {
+                                element.value = text;
+                            }
+                            
+                            // Trigger events that frameworks listen for
+                            element.dispatchEvent(new Event('input', {bubbles: true}));
+                            element.dispatchEvent(new Event('change', {bubbles: true}));
+                            element.dispatchEvent(new Event('blur', {bubbles: true}));
+                            
+                            // React specific
+                            if (element._valueTracker) {
+                                element._valueTracker.setValue(text);
+                            }
+                            
+                            return element.value === text;
                         }
+                        
+                        return simulatePaste(element, text);
                     """, element, text)
+                    
+                    if success:
+                        safe_print(f"[SUCCESS] Paste simulation successful for input element")
+                    else:
+                        safe_print(f"[WARNING] Paste simulation completed, verifying content...")
                 
                 # Final verification
                 time.sleep(0.5)
